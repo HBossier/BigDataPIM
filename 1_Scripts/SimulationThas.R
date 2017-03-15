@@ -34,6 +34,8 @@
 ##########
 ##
 
+# Reset working memory
+rm(list = ls())
 
 # working directory
 wd <- '/Users/hanbossier/Dropbox/Mastat/Thesis/RCodePIM/'
@@ -46,6 +48,8 @@ set.seed(1990)
 library(pim)
 library(dplyr)
 library(ggplot2)
+library(nleqslv)
+library(data.table)
 
 # Global variables 
 n <- 25
@@ -71,11 +75,58 @@ Y <- alpha*X + rnorm(n = n, mean = 0, sd = sdX)
 TrueBeta <- alpha/sqrt(2*sdX**2)
 
 # We can first try using the PIM package
-PIMfit <- pim(formula = Y ~ X, link = 'probit', model = 'difference')
+PIMfit <- pim(formula = Y ~ X, data = data.frame(Y = Y, X = X), link = 'probit', model = 'difference')
 summary(PIMfit)
 PIMfit@coef
-pnorm(PIMfit@coef)
-PIMfit@coef/(1+PIMfit@coef)
+
+# Manually
+# Step one: create the set of pseudo-observations
+IndX <- X %>% data.frame('X' = .) %>% mutate(index = 1:length(X))
+
+PseudoObs <- data.frame(expand.grid('Y' = Y,'Yprime' = Y),
+                expand.grid('IY' = 1:length(Y),'IYprime' = 1:length(Y))) %>%
+                rowwise() %>% mutate(X = IndX[which(IndX$index == IY),'X'],
+                Xprime = IndX[which(IndX$index == IYprime),'X']) %>%
+                filter(IY != IYprime) %>% select(-IY,-IYprime) %>% 
+                mutate(PO = ifelse(Y < Yprime,1,
+                                   ifelse(Y == Yprime,0.5,0)))
+# Check sum of PO
+PseudoObs %>% select(PO) %>% colSums()
+
+# Filter only those observations I(Y <= Yprime)
+IndPseudObs <- PseudoObs %>% filter(PO > 0)
+
+# Calculate Z
+IndPseudObs <- mutate(IndPseudObs, Z = Xprime - X)
+
+# Initial beta value for one predictor: one number
+beta <- matrix(0, ncol = 1, nrow = 1)
+# Z vector with length number of pseudo obs
+Z <- IndPseudObs %>% select(Z) %>% as.matrix(., ncol = 1)
+# Z times beta: matrix of [nPseudo x 1]
+Zbeta <- c(Z%*%beta) %>% as.matrix(., ncol = 1)
+# Pseudo observations
+PO <- IndPseudObs %>% select(PO)
+
+# Estimating equation
+colSums(Z*dnorm(Zbeta) * (PO - pnorm(Zbeta) / c(pnorm(Zbeta)*(1-pnorm(Zbeta)))))
+
+# To solve, have estimating equation in function
+PIM.ScoreFunction <- function(Z, PO){
+  U.func <- function(beta, Z, PO){ 
+    Zbeta <- c(Z%*%beta)
+    colSums(Z*dnorm(Zbeta)*(PO - pnorm(Zbeta))/c(pnorm(Zbeta)*(1-pnorm(Zbeta))))
+  }
+  return(U.func)
+}
+
+coef <- nleqslv(x = rep(0,ncol(Z)), PIM.ScoreFunction(Z = Z, PO = PO), Z=Z, PO=PO)$x
+
+data.frame('PIM' = PIMfit@coef, 'Manual' = coef)
+# Check why Z is defined as XPrime - X instead of X - XPrime
+
+
+
 
 ##
 ##########
@@ -83,11 +134,21 @@ PIMfit@coef/(1+PIMfit@coef)
 ##########
 ##
 
-# First generate the predictor values.
+# Estimating equation in function
+PIM.ScoreFunction <- function(Z, PO){
+  U.func <- function(beta, Z, PO){ 
+    Zbeta <- c(Z%*%beta)
+    colSums(Z*dnorm(Zbeta)*(PO - pnorm(Zbeta))/c(pnorm(Zbeta)*(1-pnorm(Zbeta))))
+  }
+  return(U.func)
+}
+
+# Generate the predictor values here, or inside for loop?
 # This is equally spaced between [0,u]
 X <- runif(n = n, min = 0.1, max = u)
 
-PIMpack_beta <- c()
+betaValues <- data.frame('PIM' = matrix(NA, nrow = nsim),
+                         'Manual' = matrix(NA, nrow = nsim))
 
 # Run the simulations
 for(i in 1:nsim){
@@ -99,87 +160,100 @@ for(i in 1:nsim){
   Y <- alpha*X + rnorm(n = n, mean = 0, sd = sdX) 
   
   # PIM package beta parameter
-  PIMpack_beta <- c(PIMpack_beta, pim(formula = Y ~ X, link = 'probit', model = 'difference')@coef)
+  betaValues[i,1] <- pim(formula = Y ~ X, link = 'probit', model = 'difference')@coef
   
   # Manually
   # Step one: create the set of pseudo-observations
   IndX <- X %>% data.frame('X' = .) %>% mutate(index = 1:length(X))
-
-  PseudoObs <- data.frame(expand.grid('Y' = Y,'Yprime' = Y),
-             expand.grid('IY' = 1:length(Y),'IYprime' = 1:length(Y))) %>%
-            rowwise() %>% mutate(X = IndX[which(IndX$index == IY),'X'],
-                                 Xprime = IndX[which(IndX$index == IYprime),'X']) %>%
-            filter(IY != IYprime) %>% select(-IY,-IYprime) 
-  # Calculate Z
-  PseudoObs <- mutate(PseudoObs, Z = X - Xprime)
   
-      
-      
-      
+  PseudoObs <- data.frame(expand.grid('Y' = Y,'Yprime' = Y),
+                          expand.grid('IY' = 1:length(Y),'IYprime' = 1:length(Y))) %>%
+    rowwise() %>% mutate(X = IndX[which(IndX$index == IY),'X'],
+                         Xprime = IndX[which(IndX$index == IYprime),'X']) %>%
+    filter(IY != IYprime) %>% select(-IY,-IYprime) %>% 
+    mutate(PO = ifelse(Y < Yprime,1,
+                       ifelse(Y == Yprime,0.5,0)))
+  
+  # Filter only those observations:= I(Y <= Yprime)
+  IndPseudObs <- PseudoObs %>% filter(PO > 0)
+  # Step two: calculate Z
+  Z <- mutate(IndPseudObs, Z = Xprime - X) %>% select(Z) %>% as.matrix(., ncol = 1)
+  # Pseudo observations
+  PO <- IndPseudObs %>% select(PO)
+  
+  # Step 3: estimation
+  betaValues[i,2] <- nleqslv(x = rep(0,ncol(Z)), PIM.ScoreFunction(Z = Z, PO = PO), Z = Z, PO = PO)$x
+
 }
 
+# Check some quick results
+apply(betaValues, 2, summary)
+apply(betaValues, 2, mean)
 
 
+##
+##########
+### compare speed
+##########
+##
 
-### OLDER CODE
 
-mutate(IndY,X = IndX[which('index' == IndY$Y),'index'])
+# Compare time difference between manual and package approach.
+nsim <- 5000
 
-IndY$Y == IndX$index
-which(IndX$index == IndY$Y,arr.ind = TRUE)
-apply(array(IndY$Y, dim = c(length(IndY$Y),1)), 1, FUN = function(x){return(IndX[which(IndX$index == x),'X'])})
-apply(matrix(IndY$Y, ncol = 1), 1, FUN = function(x){return(IndX[which(IndX$index == x),'X'])})
+# Run the speed test simulation: PART ONE
+t1 <- Sys.time()
+set.seed(1990)
+for(i in 1:nsim){
+  # First generate the predictor values.
+  # This is equally spaced between [0,u]
+  X <- runif(n = n, min = 0.1, max = u)
+  
+  # Generate data
+  Y <- alpha*X + rnorm(n = n, mean = 0, sd = sdX) 
+  
+  # PIM package beta parameter
+  speedTest <- pim(formula = Y ~ X, link = 'probit', model = 'difference')@coef
+}
+PackageSpeed <- Sys.time() - t1
 
-IndX[which(IndX$index == 2),'X']
 
-IndX[which('index' == 2),'X']
-mutate(IndY, test = IndX$index)
+# Run the speed test simulation: PART TWO
+t1 <- Sys.time()
+set.seed(1990)
+for(i in 1:nsim){
+  # First generate the predictor values.
+  # This is equally spaced between [0,u]
+  X <- runif(n = n, min = 0.1, max = u)
+  
+  # Generate data
+  Y <- alpha*X + rnorm(n = n, mean = 0, sd = sdX) 
 
-data.frame(expand.grid('Y' = Y,'Yprime' = Y),expand.grid('IY' = 1:length(Y),'IYprime' = 1:length(Y))) %>%
-  filter(IY != IYprime)
-
-SelectX <- function(x, X){
+  # Create the set of pseudo-observations
   IndX <- X %>% data.frame('X' = .) %>% mutate(index = 1:length(X))
-  return(IndX[which(IndX$index == x),'X'])
+  
+  PseudoObs <- data.frame(expand.grid('Y' = Y,'Yprime' = Y),
+                          expand.grid('IY' = 1:length(Y),'IYprime' = 1:length(Y))) %>%
+    rowwise() %>% mutate(X = IndX[which(IndX$index == IY),'X'],
+                         Xprime = IndX[which(IndX$index == IYprime),'X']) %>%
+    filter(IY != IYprime) %>% select(-IY,-IYprime) %>% 
+    mutate(PO = ifelse(Y < Yprime,1,
+                       ifelse(Y == Yprime,0.5,0)))
+  
+  # Filter only those observations:= I(Y <= Yprime)
+  IndPseudObs <- PseudoObs %>% filter(PO > 0)
+  # Calculate Z
+  Z <- mutate(IndPseudObs, Z = Xprime - X) %>% select(Z) %>% as.matrix(., ncol = 1)
+  # Pseudo observations
+  PO <- IndPseudObs %>% select(PO)
+  
+  # Estimation
+  speedTest <- nleqslv(x = rep(0,ncol(Z)), PIM.ScoreFunction(Z = Z, PO = PO), Z = Z, PO = PO)$x
 }
-
-data.frame(expand.grid('Y' = Y,'Yprime' = Y),
-           expand.grid('IY' = 1:length(Y),'IYprime' = 1:length(Y))) %>%
-  mutate(., apply(matrix(.$IY, ncol = 1), 1, FUN = function(x){return(IndX[which(IndX$index == x),'X'])})) %>%
-  mutate(., apply(matrix(.$IYprime, ncol = 1), 1, FUN = function(x){return(IndX[which(IndX$index == x),'X'])})) 
-
-apply(matrix(test$Y, ncol = 1), 1, FUN = function(x){return(IndX[which(IndX$index == x),'X'])})
-
-apply(matrix(IndY$Y, ncol = 1), 1, FUN = function(x){return(IndX[which(IndX$index == x),'X'])}) %>% length()
+ManualSpeed <- Sys.time() - t1
 
 
+data.frame('Package speed' = PackageSpeed,
+           'Manual speed' = ManualSpeed)
 
 
-IndY <- expand.grid('Y' = 1:length(Y),'Yprime' = 1:length(Y)) %>% 
-  filter(Y != Yprime)
-IndY <- expand.grid(Y,Y)
-expand.grid('Y' = Y,'Yprime'=Y) %>% # NEED TO REMOVE THE DUPLICATES=
-  mutate(,X = 
-           apply(matrix(IndY$Y, ncol = 1), 1, FUN = function(x){return(IndX[which(IndX$index == x),'X'])})
-  )
-mutate(ind = if_else(Y <= Yprime, true = 1, false = 0)) %>% 
-  filter(ind == 1) %>% select(Y, Yprime) %>% mutate(Z = )
-
-IndY
-
-
-
-
-
-
-a <- c(1:5)
-b <- c(4:8)
-expand.grid(a,b)
-expand.grid(a,a)
-
-summary(PIMpack_beta)
-mean(PIMpack_beta)
-
-
-mean((exp(PIMpack_beta)/(1+exp(PIMpack_beta))))
-exp(1.22)/(1+exp(1.22))
