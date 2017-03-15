@@ -5,17 +5,17 @@ The following is a very dense summary of the class of Probabilistic Index Models
 ### Probabilistic Index
 The Probabilistic Index is defined as 
 
-![PI](PI.jpg)
+![PI](3_img/PI.jpg)
 
 If (Y,**X**) and (Y',**X'**) are i.i.d, then a Probabilistic Index Model is defined as:
 
-![PIM](PIM.jpg)
+![PIM](3_img/PIM.jpg)
 
-m(.) is here a function with range [0,1] and some smoothness condition. This function is restricted so that it is related to a linear predictor ![Zbeta](Zbeta.jpg) where **Z** is a *p*-dimensional vector with elements that may depend on **X** and **X'** and *p* equal to the amount of predictors. 
+m(.) is here a function with range [0,1] and some smoothness condition. This function is restricted so that it is related to a linear predictor ![Zbeta](3_img/Zbeta.jpg) where **Z** is a *p*-dimensional vector with elements that may depend on **X** and **X'** and *p* equal to the amount of predictors. 
 
 
 ### Problem
-The goal of any regression approach is to estimate the ![beta](beta.jpg) parameters. For the PIM model, this quickly becomes computationally too demanding. To estimate these paremeters, we need to use the set of *pseudo-observations* ![pseudo](pseudo.jpg). Given some contraints which we do not discus here, the set of *pseudo-observations* increases exponentially in its limiting behavior with *n*. That is the set of indices = ![O](bigO.jpg). 
+The goal of any regression approach is to estimate the ![beta](3_img/beta.jpg) parameters. For the PIM model, this quickly becomes computationally too demanding. To estimate these paremeters, we need to use the set of *pseudo-observations* ![pseudo](3_img/pseudo.jpg). Given some contraints which we do not discus here, the set of *pseudo-observations* increases exponentially in its limiting behavior with *n*. That is the set of indices = ![O](3_img/bigO.jpg). 
 
 
 ### Goal 
