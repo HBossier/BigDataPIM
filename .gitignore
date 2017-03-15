@@ -1,13 +1,6 @@
-# Ignore math images
-PI.jpg
-PIM.jpg
-Zbeta.jpg
-pseudo.jpg
-bigO.jpg
-beta.jpg
-
 # Ignore system files
 .DS_Store
 
 # R history
 .RHistory
+
