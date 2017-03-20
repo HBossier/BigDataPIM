@@ -49,9 +49,9 @@ library(pim)
 library(dplyr)
 library(ggplot2)
 library(nleqslv)
-library(data.table)
+#library(data.table)
 
-# Global variables 
+# Global variables
 n <- 25
 u <- 1
 alpha <- 1
@@ -71,7 +71,7 @@ nsim <- 1000
 
 # Step one: generate data
 X <- runif(n = n, min = 0.1, max = u)
-Y <- alpha*X + rnorm(n = n, mean = 0, sd = sdX) 
+Y <- alpha*X + rnorm(n = n, mean = 0, sd = sdX)
 TrueBeta <- alpha/sqrt(2*sdX**2)
 
 # We can first try using the PIM package
@@ -82,12 +82,11 @@ PIMfit@coef
 # Manually
 # Step one: create the set of pseudo-observations
 IndX <- X %>% data.frame('X' = .) %>% mutate(index = 1:length(X))
-
 PseudoObs <- data.frame(expand.grid('Y' = Y,'Yprime' = Y),
                 expand.grid('IY' = 1:length(Y),'IYprime' = 1:length(Y))) %>%
                 rowwise() %>% mutate(X = IndX[which(IndX$index == IY),'X'],
                 Xprime = IndX[which(IndX$index == IYprime),'X']) %>%
-                filter(IY != IYprime) %>% select(-IY,-IYprime) %>% 
+                filter(IY != IYprime) %>% select(-IY,-IYprime) %>%
                 mutate(PO = ifelse(Y < Yprime,1,
                                    ifelse(Y == Yprime,0.5,0)))
 # Check sum of PO
@@ -113,7 +112,7 @@ colSums(Z*dnorm(Zbeta) * (PO - pnorm(Zbeta) / c(pnorm(Zbeta)*(1-pnorm(Zbeta)))))
 
 # To solve, have estimating equation in function
 PIM.ScoreFunction <- function(Z, PO){
-  U.func <- function(beta, Z, PO){ 
+  U.func <- function(beta, Z, PO){
     Zbeta <- c(Z%*%beta)
     colSums(Z*dnorm(Zbeta)*(PO - pnorm(Zbeta))/c(pnorm(Zbeta)*(1-pnorm(Zbeta))))
   }
@@ -136,7 +135,7 @@ data.frame('PIM' = PIMfit@coef, 'Manual' = coef)
 
 # Estimating equation in function
 PIM.ScoreFunction <- function(Z, PO){
-  U.func <- function(beta, Z, PO){ 
+  U.func <- function(beta, Z, PO){
     Zbeta <- c(Z%*%beta)
     colSums(Z*dnorm(Zbeta)*(PO - pnorm(Zbeta))/c(pnorm(Zbeta)*(1-pnorm(Zbeta))))
   }
@@ -155,32 +154,32 @@ for(i in 1:nsim){
   # First generate the predictor values.
   # This is equally spaced between [0,u]
   X <- runif(n = n, min = 0.1, max = u)
-  
+
   # Generate data
-  Y <- alpha*X + rnorm(n = n, mean = 0, sd = sdX) 
-  
+  Y <- alpha*X + rnorm(n = n, mean = 0, sd = sdX)
+
   # PIM package beta parameter
   betaValues[i,1] <- pim(formula = Y ~ X, link = 'probit', model = 'difference')@coef
-  
+
   # Manually
   # Step one: create the set of pseudo-observations
   IndX <- X %>% data.frame('X' = .) %>% mutate(index = 1:length(X))
-  
+
   PseudoObs <- data.frame(expand.grid('Y' = Y,'Yprime' = Y),
                           expand.grid('IY' = 1:length(Y),'IYprime' = 1:length(Y))) %>%
     rowwise() %>% mutate(X = IndX[which(IndX$index == IY),'X'],
                          Xprime = IndX[which(IndX$index == IYprime),'X']) %>%
-    filter(IY != IYprime) %>% select(-IY,-IYprime) %>% 
+    filter(IY != IYprime) %>% select(-IY,-IYprime) %>%
     mutate(PO = ifelse(Y < Yprime,1,
                        ifelse(Y == Yprime,0.5,0)))
-  
+
   # Filter only those observations:= I(Y <= Yprime)
   IndPseudObs <- PseudoObs %>% filter(PO > 0)
   # Step two: calculate Z
   Z <- mutate(IndPseudObs, Z = Xprime - X) %>% select(Z) %>% as.matrix(., ncol = 1)
   # Pseudo observations
   PO <- IndPseudObs %>% select(PO)
-  
+
   # Step 3: estimation
   betaValues[i,2] <- nleqslv(x = rep(0,ncol(Z)), PIM.ScoreFunction(Z = Z, PO = PO), Z = Z, PO = PO)$x
 
@@ -193,10 +192,29 @@ apply(betaValues, 2, mean)
 
 ##
 ##########
-### compare speed
+### Compare speed
 ##########
 ##
 
+
+# Let us make a new function to calcuclate the pseudo-observations
+CreatePO <- function(Y, X){
+  if(class(X)!='data.frame') X <- data.frame('X' = X)
+  IndX <- X %>% mutate(index = 1:length(X))
+  Yvalues <- data.frame(expand.grid('Y' = Y,'Yprime' = Y),
+                        expand.grid('IY' = 1:length(Y),'IYprime' = 1:length(Y)))
+  # Now create P0 and select the I:= Y <= YPrime
+  POdoubles <-  Yvalues %>%  mutate(PO = ifelse(Y < Yprime,1,
+            ifelse(Y == Yprime,0.5,0))) %>% filter(PO > 0)
+  # Note that we have Y and Y in the data frame. We delete these now.
+  POsingles <- POdoubles %>% filter(IY != IYprime)
+
+  # Now we need to add the X and Xprime variables, we use the indicators for Y and X to do this.
+  PO <- POsingles %>% rowwise() %>% mutate(X = IndX[which(IndX$index == IY),'X'],
+            Xprime = IndX[which(IndX$index == IYprime),'X'])
+
+  return(PO %>% select(-IY,-IYprime))
+}
 
 # Compare time difference between manual and package approach.
 nsim <- 5000
@@ -208,10 +226,10 @@ for(i in 1:nsim){
   # First generate the predictor values.
   # This is equally spaced between [0,u]
   X <- runif(n = n, min = 0.1, max = u)
-  
+
   # Generate data
-  Y <- alpha*X + rnorm(n = n, mean = 0, sd = sdX) 
-  
+  Y <- alpha*X + rnorm(n = n, mean = 0, sd = sdX)
+
   # PIM package beta parameter
   speedTest <- pim(formula = Y ~ X, link = 'probit', model = 'difference')@coef
 }
@@ -225,28 +243,16 @@ for(i in 1:nsim){
   # First generate the predictor values.
   # This is equally spaced between [0,u]
   X <- runif(n = n, min = 0.1, max = u)
-  
-  # Generate data
-  Y <- alpha*X + rnorm(n = n, mean = 0, sd = sdX) 
 
-  # Create the set of pseudo-observations
-  IndX <- X %>% data.frame('X' = .) %>% mutate(index = 1:length(X))
-  
-  PseudoObs <- data.frame(expand.grid('Y' = Y,'Yprime' = Y),
-                          expand.grid('IY' = 1:length(Y),'IYprime' = 1:length(Y))) %>%
-    rowwise() %>% mutate(X = IndX[which(IndX$index == IY),'X'],
-                         Xprime = IndX[which(IndX$index == IYprime),'X']) %>%
-    filter(IY != IYprime) %>% select(-IY,-IYprime) %>% 
-    mutate(PO = ifelse(Y < Yprime,1,
-                       ifelse(Y == Yprime,0.5,0)))
-  
-  # Filter only those observations:= I(Y <= Yprime)
-  IndPseudObs <- PseudoObs %>% filter(PO > 0)
+  # Generate data
+  Y <- alpha*X + rnorm(n = n, mean = 0, sd = sdX)
+  # Create the pseudo-observations
+  Observations <- CreatePO(Y = Y, X = X)
   # Calculate Z
-  Z <- mutate(IndPseudObs, Z = Xprime - X) %>% select(Z) %>% as.matrix(., ncol = 1)
+  Z <- mutate(Observations, Z = Xprime - X) %>% select(Z) %>% as.matrix(., ncol = 1)
   # Pseudo observations
-  PO <- IndPseudObs %>% select(PO)
-  
+  PO <- Observations %>% select(PO)
+
   # Estimation
   speedTest <- nleqslv(x = rep(0,ncol(Z)), PIM.ScoreFunction(Z = Z, PO = PO), Z = Z, PO = PO)$x
 }
@@ -254,6 +260,74 @@ ManualSpeed <- Sys.time() - t1
 
 
 data.frame('Package speed' = PackageSpeed,
-           'Manual speed' = ManualSpeed)
+           'Manual speed' = ManualSpeed,
+           'Number of simulations' = nsim,
+           'Sample size' = n)
+
+
+# For now: better to use package!
+
+
+##
+##########
+### Replicate results of Thas et al.
+##########
+##
+
+
+# Simulate over 1000 simulations in which we vary alpha, u, sigma and n:
+alpha <- c(1,10)
+sigma <- c(1,5)
+u <- c(1,10)
+n <- c(25,50,200)
+
+combinations <- expand.grid('alpha' = alpha,'sigma' = sigma,'u' = u, 'n' = n)
+
+BetaValues <- array(NA, dim = c(nsim, dim(combinations)[1]))
+
+# loop over the combinations
+for(c in 1:dim(combinations)[1]){
+  # Print status
+  print(paste0('@: ', combinations[c,]))
+  # Set the parameters
+  nSim <- combinations[c,'n']
+  uSim <- combinations[c,'u']
+  alphaSim <- combinations[c,'alpha']
+  sigmaSim <- combinations[c,'sigma']
+
+  # Generate predictor
+  X <- runif(n = nSim, min = 0.1, max = uSim)
+
+  # Fit the model nsim times
+  for(i in 1:nsim){
+    # Generate data
+    Y <- alphaSim*X + rnorm(n = nSim, mean = 0, sd = sigmaSim)
+
+    # PIM package beta parameter
+    value <- try(pim(formula = Y ~ X, link = 'probit', model = 'difference')@coef, silent = TRUE)
+    if(class(value) == 'try-error'){
+      print(paste0('Error in sim ',i, ' c = ', c, '. Message = ', attr(value,"condition")))
+      next
+    }else{
+      BetaValues[i,c] <- value
+    }
+  }
+}
+
+# Dimension
+BetaValues
+dim(BetaValues)
+
+# Average beta hat and variance
+combinations <- combinations %>% mutate(beta = round(alpha/(sqrt(2) * sigma), digits = 3))
+ReplResults <- data.frame(combinations, AvBetaHat = round(colMeans(BetaValues), digits = 5),
+              VarBetaHat = round(apply(BetaValues, 2, var), digits = 5))
+
+
+# Why is the combination alpha = 10 and u = 10 not good?
+
+
+
+
 
 
