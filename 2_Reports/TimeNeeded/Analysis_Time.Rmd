@@ -1,0 +1,109 @@
+---
+title: 'Running large databases: PIM'
+output:
+  html_notebook: 
+    theme: journal
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	comment = NA,
+	warning = FALSE
+)
+```
+
+# Introduction
+In this report, we try to fit PIM models when $N$ is large. As the estimation procecures uses the set of *pseudo-observations*, the computation time increases exponentially with $n$: $O(n^2)$.
+
+# Data generation
+We will generate data according to the normal linear model: $Y_i = \alpha X_i + \varepsilon_i$ with $i=1,...n$. Also, $\varepsilon_i|X_i$ are IID and $N(0, \sigma^2_\varepsilon(X_i))$. The predictor takes values uniformly within $[0.1,u]$ where $u = 1$. For instance, take $\alpha = 5$. Then generating data and fitting the PIM model in R is done through:
+
+```{r}
+library(pim)
+library(nleqslv)
+library(data.table)
+library(ggplot2)
+```
+
+
+```{r}
+# Parameters
+n <- 50
+u <- 1
+alpha <- 5
+sigma <- 1
+trueBeta <- alpha/(sqrt(2) * sigma)
+
+# Generate predictor
+X <- runif(n = n, min = 0.1, max = u)
+# Generate data
+Y <- alpha*X + rnorm(n = n, mean = 0, sd = sigma)
+
+# PIM package beta parameter
+BETAvalue <- try(pim(formula = Y ~ X, link = 'probit', model = 'difference')@coef, silent = TRUE)
+data.frame(BETAvalue,trueBeta)
+```
+
+# Increasing N
+We take the code from above, and run this while increasing $N$ initially from $10$ to $25.000$. 
+
+## Locally
+First, we test this locally. The vector $N$ is given by:
+
+```{r}
+n <- round(seq(10,25000,length.out = 25), 0)
+n
+```
+
+The estimated beta coefficients and time needed to estimate the model for each sample size $N$ are stored in a text file. And plotted below.
+```{r fig.align = 'center'}
+# Text files: time is measured in minutes
+estimBeta <- fread('/Users/hanbossier/Dropbox/Mastat/Thesis/ResultsTimeNeeded/beta_501.txt', data.table = FALSE, col.names = 'EstimatedBeta')
+TimeNeeded <- fread('/Users/hanbossier/Dropbox/Mastat/Thesis/ResultsTimeNeeded/time_501.txt', data.table = FALSE, col.names = 'TimeInMin')
+# Overview
+local <- data.frame(EstimatedBeta = estimBeta, TrueBeta = trueBeta, SampleSize = n, TimeInMin = TimeNeeded);local
+# Plot
+ggplot(local, aes(x = SampleSize, y = TimeInMin)) + geom_line() + 
+    scale_x_continuous(name = "Sample Size (N)") + scale_y_continuous(name = "Time (minutes)") + theme_light()
+```
+
+
+
+## HPC
+We execute the same code on the HPC infrastructure of UGent and iterated for $K = 500$ times. The results are stored externaly in text files caled *beta_N_n_K_k.txt* and *time_N_n_K_k.txt* in which small *n* and small *k* represent the sample size and iteration respectively. 
+
+```{r cache = TRUE}
+# Data directory
+dataWD <- '/Volumes/2_TB_WD_Elements_10B8_Han/PhD/BigDataPIM/TimeNeeded/output/separate'
+# Number of simulations
+nsim <- 500
+betavalues <- array(NA, dim = c(length(n), nsim))
+recordedTime <- array(NA, dim = c(length(n), nsim))
+# Run loop over n and nsim
+for(i in 1:length(n)){
+  for(k in 1:nsim){
+    # Read in text files: estimated beta and time needed to estimate
+    beta.tmp <- try(fread(paste(dataWD, '/beta_N_', n[i], '_K_', k, '.txt', sep = '' ), data.table = FALSE, verbose = FALSE), silent                 = TRUE)
+    if(class(beta.tmp) == 'try-error'){ 
+      next
+    }else{
+      betavalues[i,k] <- as.numeric(beta.tmp)
+    }
+    time.tmp <- try(fread(paste(dataWD, '/time_N_', n[i], '_K_', k, '.txt', sep = '' ), data.table = FALSE, verbose = FALSE), silent                 = TRUE)
+    if(class(time.tmp) == 'try-error'){
+      next
+    }else{
+      recordedTime[i,k] <- as.numeric(time.tmp)
+    }
+  }
+}
+
+# How many values have we recorded?
+data.frame(EstimatedBeta = apply(betavalues, 1, mean), TrueBeta = trueBeta, SampleSize = n, TimeInMin = apply(recordedTime, 1, mean))
+
+```
+
+We were only able to reliably run the model when $N \leq 8340$. When $N$ was higher, we ran out of memory to solve the estimating equations. 
