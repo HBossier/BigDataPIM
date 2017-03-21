@@ -1,0 +1,2 @@
+# Converting html files from RMarkdown reports to class documentation rather than code.
+*.html linguist-documentation
