@@ -55,7 +55,7 @@ library(nleqslv)
 n <- 25
 u <- 1
 alpha <- 1
-sdX <- 1
+sigma <- 1
 
 # Number of simulations
 nsim <- 1000
@@ -71,8 +71,8 @@ nsim <- 1000
 
 # Step one: generate data
 X <- runif(n = n, min = 0.1, max = u)
-Y <- alpha*X + rnorm(n = n, mean = 0, sd = sdX)
-TrueBeta <- alpha/sqrt(2*sdX**2)
+Y <- alpha*X + rnorm(n = n, mean = 0, sd = sigma)
+TrueBeta <- alpha/(sqrt(2) * sigma)
 
 # We can first try using the PIM package
 PIMfit <- pim(formula = Y ~ X, data = data.frame(Y = Y, X = X), link = 'probit', model = 'difference')
@@ -156,7 +156,7 @@ for(i in 1:nsim){
   X <- runif(n = n, min = 0.1, max = u)
 
   # Generate data
-  Y <- alpha*X + rnorm(n = n, mean = 0, sd = sdX)
+  Y <- alpha*X + rnorm(n = n, mean = 0, sd = sigma)
 
   # PIM package beta parameter
   betaValues[i,1] <- pim(formula = Y ~ X, link = 'probit', model = 'difference')@coef
@@ -228,7 +228,7 @@ for(i in 1:nsim){
   X <- runif(n = n, min = 0.1, max = u)
 
   # Generate data
-  Y <- alpha*X + rnorm(n = n, mean = 0, sd = sdX)
+  Y <- alpha*X + rnorm(n = n, mean = 0, sd = sigma)
 
   # PIM package beta parameter
   speedTest <- pim(formula = Y ~ X, link = 'probit', model = 'difference')@coef
@@ -245,7 +245,7 @@ for(i in 1:nsim){
   X <- runif(n = n, min = 0.1, max = u)
 
   # Generate data
-  Y <- alpha*X + rnorm(n = n, mean = 0, sd = sdX)
+  Y <- alpha*X + rnorm(n = n, mean = 0, sd = sigma)
   # Create the pseudo-observations
   Observations <- CreatePO(Y = Y, X = X)
   # Calculate Z

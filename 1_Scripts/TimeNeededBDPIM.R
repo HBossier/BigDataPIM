@@ -77,7 +77,7 @@ for(i in 1:length(n)){
   # PIM package beta parameter
   value <- try(pim(formula = Y ~ X, link = 'probit', model = 'difference')@coef, silent = TRUE)
   if(class(value) == 'try-error'){
-    print(paste0('Error in sim ',i, ' c = ', c, '. Message = ', attr(value,"condition")))
+    print(paste0('Error in sim ',i, '. Message = ', attr(value,"condition")))
     next
   }else{
     BetaValues[i] <- value
