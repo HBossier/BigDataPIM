@@ -1,8 +1,10 @@
 ---
 title: 'Running large databases: PIM'
 output:
-  html_notebook: 
+  word_document: default
+  html_notebook:
     theme: journal
+  pdf_document: default
   html_document: default
 ---
 
@@ -26,6 +28,8 @@ library(pim)
 library(nleqslv)
 library(data.table)
 library(ggplot2)
+library(dplyr)
+library(ggthemes)
 ```
 
 
@@ -77,33 +81,57 @@ We execute the same code on the HPC infrastructure of UGent and iterated for $K 
 
 ```{r cache = TRUE}
 # Data directory
-dataWD <- '/Volumes/2_TB_WD_Elements_10B8_Han/PhD/BigDataPIM/TimeNeeded/output/separate'
+dataWD <- '/Volumes/2_TB_WD_Elements_10B8_Han/PhD/BigDataPIM/TimeNeeded/output/'
 # Number of simulations
 nsim <- 500
 betavalues <- array(NA, dim = c(length(n), nsim))
 recordedTime <- array(NA, dim = c(length(n), nsim))
-# Run loop over n and nsim
-for(i in 1:length(n)){
-  for(k in 1:nsim){
-    # Read in text files: estimated beta and time needed to estimate
-    beta.tmp <- try(fread(paste(dataWD, '/beta_N_', n[i], '_K_', k, '.txt', sep = '' ), data.table = FALSE, verbose = FALSE), silent                 = TRUE)
-    if(class(beta.tmp) == 'try-error'){ 
-      next
-    }else{
-      betavalues[i,k] <- as.numeric(beta.tmp)
-    }
-    time.tmp <- try(fread(paste(dataWD, '/time_N_', n[i], '_K_', k, '.txt', sep = '' ), data.table = FALSE, verbose = FALSE), silent                 = TRUE)
-    if(class(time.tmp) == 'try-error'){
-      next
-    }else{
-      recordedTime[i,k] <- as.numeric(time.tmp)
-    }
+# For loop nsim
+for(k in 1:nsim){
+  # Read in text files: estimated beta and time needed to estimate
+  beta.tmp <- try(fread(paste(dataWD, '/beta_', k, '.txt', sep = '' ), data.table = FALSE, verbose = FALSE), silent = TRUE)
+  if(class(beta.tmp) == 'try-error'){ 
+    next
+  }else{
+    betavalues[,k] <- as.numeric(unlist(beta.tmp))
+  }
+  time.tmp <- try(fread(paste(dataWD, '/time_', k, '.txt', sep = '' ), data.table = FALSE, verbose = FALSE), silent = TRUE)
+  if(class(time.tmp) == 'try-error'){
+    next
+  }else{
+    recordedTime[,k] <- as.numeric(unlist(time.tmp))
   }
 }
 
-# How many values have we recorded?
+
+# Do we have all data?
 data.frame(EstimatedBeta = apply(betavalues, 1, mean), TrueBeta = trueBeta, SampleSize = n, TimeInMin = apply(recordedTime, 1, mean))
 
+# Not really, but let us continue with what we have: focus on time.
+HPC <- data.frame('TimeInMin' = matrix(recordedTime, ncol = 1), 'SampleSize' = n, 'Machine' = 'HPC')
+
+# Make plot with local machine and HPC
+BothMachines <- local %>% select(TimeInMin, SampleSize) %>% mutate(Machine = 'Laptop') %>%  bind_rows(., HPC) %>% filter(complete.cases(.)) %>% tbl_df()
+# The plot itself: points and smoothed line (gam function)
+BothMachines %>% 
+  ggplot(., aes(x = SampleSize, y = TimeInMin, group = Machine)) +
+  geom_smooth(method = "auto", aes(colour = Machine)) + geom_point(aes(colour = Machine), alpha = 0.1) +
+    scale_x_continuous(name = "Sample Size (N)") + 
+    scale_y_continuous(name = "Time (minutes)") + 
+    # Now add theme based on FiveThirtyEight
+    theme_foundation(base_size = 12, base_family = "sans") + 
+        theme(line = element_line(colour = "black"), rect = element_rect(fill = ggthemes_data$fivethirtyeight["ltgray"], 
+            linetype = 0, colour = NA), text = element_text(colour = ggthemes_data$fivethirtyeight["dkgray"]), 
+            axis.ticks = element_blank(), axis.line = element_blank(), 
+            legend.background = element_rect(), legend.position = "top", 
+            legend.direction = "horizontal", legend.box = "vertical", 
+            panel.grid = element_line(colour = NULL), panel.grid.major = element_line(colour = ggthemes_data$fivethirtyeight["medgray"]), 
+            panel.grid.minor = element_blank(), plot.title = element_text(hjust = 0, 
+                size = rel(1.5), face = "bold"), plot.margin = unit(c(1, 
+                1, 1, 1), "lines"), strip.background = element_rect())
+
 ```
+
+
 
 We were only able to reliably run the model when $N \leq 8340$. When $N$ was higher, we ran out of memory to solve the estimating equations. 
