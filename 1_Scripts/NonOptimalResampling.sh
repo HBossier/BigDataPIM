@@ -24,7 +24,7 @@ cd $srcdir
 
 #----------------------------------------------------#
 # GO TIME!
-Rscript NonOptimalResampling.R ${PBS_ARRAYID} "${srcdir}"/results
+Rscript NonOptimalResampling.R ${PBS_ARRAYID} "${srcdir}"/results "HPC"
 #----------------------------------------------------#
 
 
