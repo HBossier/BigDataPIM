@@ -17,6 +17,8 @@
 # In this script, we run for J times the resampling scheme with 1/n probability assigned 
 # to all observations for being selected within an iteration.
 
+# We test several scenario's.
+
 # Not yet integrated within PIM package.
 
 ##
@@ -38,20 +40,24 @@ ID <- try(as.numeric(as.character(args)[1]), silent=TRUE)
 ResultsDir <- try(as.character(args)[2], silent=TRUE)
 
 # Which machine: HPC or LOCAL
-MACHINE <- try(as.character(input)[3],silent=TRUE)
+MACHINE <- try(as.character(args)[3],silent=TRUE)
+
+# Different scenario's
+SCEN <- try(as.numeric(as.character(args)[4], silent = TRUE))
 
 # If no machine is specified (it gives error), then it has to be this machine!
-if(class(MACHINE)=='try-error'){
+if(is.na(MACHINE)){
 	MACHINE <- "LOCAL"
 	nsim <- 1000
   	ID <- 1:nsim
   	ResultsDir <- 'D:/Users/Han/Dropbox/Mastat/Thesis/Results/Univariate/NonOptimalLocal'
+  	# Scenario
+  	SCEN <- 2
 }
 print(ResultsDir)
 
-# Seed
-StartingSeed <- 11
-
+# Starting seed
+StartingSeed <- 11 * SCEN
 
 # Libraries
 library(pim)
@@ -62,10 +68,34 @@ library(nleqslv)
 
 # Global variables: univariate simple linear regression 
 n <- 250000
-u <- 1
-alpha <- 5
-sigma <- 2
-trueBeta <- alpha/(sqrt(2) * sigma)
+
+# Depending on scenario, different parameter values
+if(SCEN == 1){
+  u <- 1
+  alpha <- 5
+  sigma <- 1
+  trueBeta <- alpha/(sqrt(2) * sigma)
+}
+if(SCEN == 2){
+  u <- 10
+  alpha <- 10
+  sigma <- 5
+  trueBeta <- alpha/(sqrt(2) * sigma)
+}
+if(SCEN == 3){
+	### NEED TO IMPLEMENT THIRD SCENARIO
+  u <- 7
+  alpha_1 <- -0.5
+  alpha_0 <- 47.5
+  sigma <- 2
+  trueBeta <- alpha_1/(sqrt(2) * sigma)
+
+  	X <- sample(x = c(0:u), size = n, replace = TRUE)
+	# Generate data
+	Y <- alpha_0 + alpha_1*X + rnorm(n = n, mean = 0, sd = sigma)
+
+}
+
 
 
 ##
@@ -96,8 +126,8 @@ if(MACHINE == "HPC"){
 
 	# Recorded time: per simulation 
 	recordedTime <- array(NA, dim = nPairs)
-	# True beta value: initialize with NULL values 
-	BetaValues <- data.frame(beta = NULL, K = NULL, nRSloops = NULL)
+	# Estimated values: initialize with NULL 
+	BetaValues <- data.frame(beta = NULL, sVariance = NULL, K = NULL, nRSloops = NULL, TrueBeta = NULL)
 
 	# Progress in simulations  
 	progress <- floor(seq(1, nPairs, length.out = 11)[-1])
@@ -114,44 +144,44 @@ if(MACHINE == "HPC"){
 		nRSloops <- pairs[i,'nRSloops']
 		K <- pairs[i,'K']
 
-		# Gather beta values inside resampling scheme 
-		beta_loop <- c()
-
+		# Gather beta values and variance estimators inside resampling scheme 
+		beta_loop <- beta_sVar <- c()
+		
 		# Start recording time
 		StartTime <- Sys.time()
 
 		# Start resampling scheme 
 		for(l in 1:nRSloops){
 			# Sample rows from original data with 1/n probability (i.e. weight = NULL)
-			SelectedData <- dplyr::sample_n(OrigData, size = K, replace = TRUE, weight = NULL)
+			SelectedData <- dplyr::sample_n(OrigData, size = K, replace = FALSE, weight = NULL)
 
-			# Try to fit PIM. If fails, return message. 
-			value <- try(pim(formula = Y ~ X, data = SelectedData, 
-								link = 'probit', model = 'difference')@coef, silent = TRUE)
-		  	if(class(value) == 'try-error'){
-		  		print(paste0('Error in sim ',i, '. Iteration ',l,'. Message = ', attr(value,"condition")))
-		  		next
-		  	}else{
-		  		# Save recorded value if no error.
-		  		beta_loop <- c(beta_loop, value)
-		  	}
+			# Try to fit PIM. If fails, return coordinates. 
+			PIMfit <- try(pim(formula = Y ~ X, data = SelectedData, 
+			                  link = 'probit', model = 'difference'), silent = TRUE)
+			if(class(PIMfit) == 'try-error'){
+			  print(paste0('Error in sim ',i, '. Iteration ',l,'.'))
+			  next
+			}else{
+			  # Save beta value if no error.
+			  beta_loop <- c(beta_loop, PIMfit@coef)
+			  # Save sandwich variance estimator
+			  beta_sVar <- c(beta_sVar, PIMfit@vcov)
+			}
 		}
 		# Recorded time 
 		recordedTime[i] <- difftime(time1 = Sys.time(), time2 = StartTime, units = 'mins')
-
-		# Collect beta values with info about nRSloops and K
+		
+		# Collect estimated beta values and variance with info about nRSloops and K
 		BetaValues <- bind_rows(BetaValues, 
-						data.frame(beta = beta_loop,
-							K = K,
-							nRSloops = nRSloops))
-
+		                data.frame(beta = beta_loop,
+		                           sVariance = beta_sVar, 
+		                           K = K,
+		                           nRSloops = nRSloops,
+		                           TrueBeta = trueBeta))
 	}
-
-
 	# Write results of beta and recorded time 
-	write.table(BetaValues, file = paste(ResultsDir, '/uni_beta_vector_simID_',ID, '.txt', sep = ''), row.names = FALSE, col.names = FALSE)
-	write.table(recordedTime, file = paste(ResultsDir, '/uni_time_vector_simID_',ID, '.txt', sep = ''), row.names = FALSE, col.names = FALSE)
-
+	write.table(BetaValues, file = paste(ResultsDir, '/uni_beta_vector_simID_',ID, '_SCEN_', SCEN, '.txt', sep = ''), row.names = FALSE, col.names = TRUE)
+	write.table(recordedTime, file = paste(ResultsDir, '/uni_time_vector_simID_',ID, '_SCEN_', SCEN, '.txt', sep = ''), row.names = FALSE, col.names = TRUE)
 }
 
 
@@ -164,8 +194,8 @@ if(MACHINE == "HPC"){
 
 # If running locally, then start here 
 if(MACHINE == "LOCAL"){
-	# Start j loop over all simulations 
-	for(j in ID){	
+	# Start j loop over all (or some if testing code) simulations 
+	for(j in 1:2){	
 		# Vector of number of resampling loops
 		nRSloops_vec <- floor(seq(10,1000,length.out = 10))
 
@@ -185,8 +215,8 @@ if(MACHINE == "LOCAL"){
 
 		# Recorded time: per simulation 
 		recordedTime <- array(NA, dim = nPairs)
-		# True beta value: initialize with NULL values 
-		BetaValues <- data.frame(beta = NULL, K = NULL, nRSloops = NULL)
+		# Estimated values: initialize with NULL 
+		BetaValues <- data.frame(beta = NULL, sVariance = NULL, K = NULL, nRSloops = NULL, TrueBeta = NULL)
 
 		# Progress in simulations  
 		progress <- floor(seq(1, nPairs, length.out = 11)[-1])
@@ -203,8 +233,8 @@ if(MACHINE == "LOCAL"){
 			nRSloops <- pairs[i,'nRSloops']
 			K <- pairs[i,'K']
 
-			# Gather beta values inside resampling scheme 
-			beta_loop <- c()
+			# Gather beta values and variance estimators inside resampling scheme 
+			beta_loop <- beta_sVar <- c()
 
 			# Start recording time
 			StartTime <- Sys.time()
@@ -212,34 +242,36 @@ if(MACHINE == "LOCAL"){
 			# Start resampling scheme 
 			for(l in 1:nRSloops){
 				# Sample rows from original data with 1/n probability (i.e. weight = NULL)
-				SelectedData <- dplyr::sample_n(OrigData, size = K, replace = TRUE, weight = NULL)
+				SelectedData <- dplyr::sample_n(OrigData, size = K, replace = FALSE, weight = NULL)
 
 				# Try to fit PIM. If fails, return message. 
-				value <- try(pim(formula = Y ~ X, data = SelectedData, 
-									link = 'probit', model = 'difference')@coef, silent = TRUE)
-			  	if(class(value) == 'try-error'){
-			  		print(paste0('Error in sim ',i, '. Iteration ',l,'. Message = ', attr(value,"condition")))
+				PIMfit <- try(pim(formula = Y ~ X, data = SelectedData, 
+									link = 'probit', model = 'difference'), silent = TRUE)
+			  	if(class(PIMfit) == 'try-error'){
+			  		print(paste0('Error in sim ',i, '. Iteration ',l,'. Message = ', attr(PIMfit,"condition")))
 			  		next
 			  	}else{
-			  		# Save recorded value if no error.
-			  		beta_loop <- c(beta_loop, value)
+			  		# Save beta value if no error.
+			  		beta_loop <- c(beta_loop, PIMfit@coef)
+			  		# Save sandwich variance estimator
+			  		beta_sVar <- c(beta_sVar, PIMfit@vcov)
 			  	}
 			}
 			# Recorded time 
 			recordedTime[i] <- difftime(time1 = Sys.time(), time2 = StartTime, units = 'mins')
 
-			# Collect beta values with info about nRSloops and K
+			# Collect estimated beta values and variance with info about nRSloops and K
 			BetaValues <- bind_rows(BetaValues, 
 							data.frame(beta = beta_loop,
-								K = K,
-								nRSloops = nRSloops))
-
+							  sVariance = beta_sVar, 
+							  K = K,
+							  nRSloops = nRSloops,
+							  TrueBeta = trueBeta))
 		}
 
-
 		# Write results of beta and recorded time 
-		write.table(BetaValues, file = paste(ResultsDir, '/uni_beta_vector_local_simID_',ID[j], '.txt', sep = ''), row.names = FALSE, col.names = FALSE)
-		write.table(recordedTime, file = paste(ResultsDir, '/uni_time_vector_local_simID_',ID[j], '.txt', sep = ''), row.names = FALSE, col.names = FALSE)
+		write.table(BetaValues, file = paste(ResultsDir, '/uni_beta_vector_local_simID_',ID[j], '_SCEN_', SCEN, '.txt', sep = ''), row.names = FALSE, col.names = TRUE)
+		write.table(recordedTime, file = paste(ResultsDir, '/uni_time_vector_local_simID_',ID[j], '_SCEN_', SCEN, '.txt', sep = ''), row.names = FALSE, col.names = TRUE)
 
 	}
 }

@@ -1,7 +1,7 @@
 #!/bin/sh
 #
 #
-#PBS -N NonOptimal
+#PBS -N NonOptimalS2
 #PBS -o output/output.file
 #PBS -e error/error.file
 #PBS -m a
@@ -21,10 +21,16 @@ srcdir=/user/scratch/gent/gvo000/gvo00022/vsc40728/BIGPIM/NonOptimal
 cd $srcdir
 #----------------------------------------------------#
 
+#----------------------------------------------------#
+# WHICH SCENARIO
+SCEN=2
+echo 'scenario ' $SCEN
+#----------------------------------------------------#
+
 
 #----------------------------------------------------#
 # GO TIME!
-Rscript NonOptimalResampling.R ${PBS_ARRAYID} "${srcdir}"/results "HPC"
+Rscript NonOptimalResampling.R ${PBS_ARRAYID} "${srcdir}"/results "HPC" "$SCEN"
 #----------------------------------------------------#
 
 
