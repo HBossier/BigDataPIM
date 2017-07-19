@@ -1,11 +1,11 @@
 #!/bin/sh
 #
 #
-#PBS -N NonOptimalS2
+#PBS -N NonOptimalS3
 #PBS -o output/output.file
 #PBS -e error/error.file
 #PBS -m a
-#PBS -l walltime=16:00:00
+#PBS -l walltime=20:00:00
 #PBS -l vmem=40GB
 #
 
@@ -23,7 +23,7 @@ cd $srcdir
 
 #----------------------------------------------------#
 # WHICH SCENARIO
-SCEN=2
+SCEN=3
 echo 'scenario ' $SCEN
 #----------------------------------------------------#
 
