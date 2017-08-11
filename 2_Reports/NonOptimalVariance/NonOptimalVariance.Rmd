@@ -1,0 +1,330 @@
+---
+title: "Non Optimal - Variance"
+author: "Han Bossier"
+date: "10-8-2017"
+output:
+  html_document:
+    theme: journal
+    toc: yes
+  pdf_document:
+    toc: yes
+---
+
+```{r "setup", include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	comment = NA,
+	cache = TRUE,
+	warning = FALSE
+)
+
+# libraries
+library(ggplot2)
+library(dplyr)
+library(ggthemes)
+library(RColorBrewer)
+library(boot)
+library(parallel)
+
+# Bootstrap function
+BootCI <- function(OrigData, type = 'bca'){
+  # Function to calculate mean statistic
+  meanBoot <- function(data, indices){
+    d <- data[indices]
+    return(mean(d))
+  }
+  # Bootstrap and CI
+  boot_result <- boot(data = OrigData, statistic = meanBoot, R = 1000)
+  boot_ci <- boot.ci(boot_result, type = type)
+  return(data.frame('lwrBoot' = boot_ci$bca[4], 'uprboot' = boot_ci$bca[5]))
+}
+
+# Construct a function that can be used over workers in parallel
+BootParCI <- function(sID, datLoc, SCEN){
+  # Bootstrap function
+  BootCI <- function(OrigData, type = 'bca'){
+    # Function to calculate mean statistic
+    meanBoot <- function(data, indices){
+      d <- data[indices]
+      return(mean(d))
+    }
+    # Bootstrap and CI
+    boot_result <- boot(data = OrigData, statistic = meanBoot, R = 1000)
+    boot_ci <- boot.ci(boot_result, type = type)
+    return(data.frame('lwrBoot' = boot_ci$bca[4], 'uprboot' = boot_ci$bca[5]))
+  }
+
+  # Read values from one simulation: estimated beta values averaged within the sampling algorithm
+  ValSim <- read.table(file = paste0(datLoc, 'uni_beta_vector_simID_', sID, '_SCEN_', SCEN, '.txt'),
+                 col.names = c("beta", "sVariance", "K", "nRSloops", "TrueBeta"), header = TRUE) %>% 
+                   tbl_df()
+
+  # Run bootstrap, construct CI, append the true value, then check whether this value is in CI
+  PercCI <- ValSim %>% group_by(K, nRSloops) %>% 
+    do(bind_cols(BootCI(OrigData = .$beta))) %>%
+    mutate(TrueBeta = as.numeric(slice(select(ValSim, TrueBeta), 1))) %>%
+    do(slice(., 1)) %>% rowwise() %>% mutate(coverage = ifelse(TrueBeta >= lwrBoot && TrueBeta <= uprboot, 1, 0)) %>% 
+      mutate(sim = sID) 
+  return(PercCI)
+}
+
+# Get info on machine we are compiling
+OS <- Sys.info()['machine']
+if(OS == 'x86_64'){
+  MACHINE <- "MAC"
+  wd <- '/Users/hanbossier/Dropbox/Mastat/Thesis/BigDataPIM'
+}else{
+  MACHINE <- "DOS"
+  wd <- 'D:/Users/Han/Dropbox/Mastat/Thesis/BigDataPIM'
+}
+
+# location of data
+if(MACHINE == "MAC"){
+datLoc <- "/Volumes/1_5_TB_Han_HDD/Mastat/Thesis/BigDataPIM/NonOptimal/"  
+}
+if(MACHINE == "DOS"){
+datLoc <- ""  
+}
+```
+
+## Introduction
+
+In this report, we look at options to estimate the variance parameters with the non optimal resampling method for fitting probabilistic index models (PIM) on large databases. As explained more in detail below, this subsampling method consists of sampling a certain amount of subsets from a large database and then fit a PIM on these subsets. As shown in previous reports, the resulting average parameter estimate are unbiased. However, we have not yet looked at the estimation of the variance using all subsamples. 
+
+We will explore two options. The first one is to take the average of the sandwich variance PIM estimates and use this to construct confidence intervals. The second option is to apply a bootstrap on the subsample estimates to estimate the variance.
+
+We will first describe the subsampling algorithm, then the simulation models with its parameters and finally look at the results.
+
+## Non Optimal Subsampling
+Consider a set of subsampling probabilites $\pi_i, i = 1,...,n$ assigned to all data points. We define $\boldsymbol{\pi} = \{\pi_i\}_{i=1}^n$. Next we apply the following algorithm:
+
+* **1) sample:** draw a random sample $K < N$ from the original dataset with probability $\boldsymbol{\pi}$
+* **2) estimate:** estimate the $\beta$ parameters using a PIM on the subset of the data. 
+* **3) iterate:** repeat step 1 for **B** times.
+
+In this report, we consider the nonuniform subsampling probability $\boldsymbol{\pi}^{\text{UNI}} = \{\pi_i = n^{-1}\}_{i=1}^n$ in step 1. 
+
+## Models
+
+### Model 1
+
+#### Data generation
+```{r "generate-model-1", echo = FALSE}
+u <- 1
+alpha <- 5
+sigma <- 1
+trueBeta <- alpha/(sqrt(2) * sigma)
+```
+
+We first generate data under the linear model:
+
+$$
+Y_i = \alpha X_i + \varepsilon_i 
+$$
+with $i = 1,...,n$ and $\varepsilon_i$ are i.i.d. $N({0,\sigma^2)}$ with $\sigma^2 = 1$. We consider a sample size $n = 250.000$. The predictor (*X*) is uniformly spaced between $[0.1,1]$. The value $\alpha$ is set to 5. Using the probit link function, the corresponding PIM can be expressed as:
+
+$$
+\Phi^{-1}[P(Y\preceq Y'|X,X')] = \beta(X' - X)
+$$
+where $\beta = \alpha/\sqrt{2\sigma^2}$. Hence the true value for $\beta$ equals ```r 5/(sqrt(2 * 1))```.
+
+### Model 2
+
+#### Data generation
+
+The second model is a multiple regression model in which we take parameters from the analysis done in Przybylski and Weinstein (2017). In their study, the authors used linear regression to model the effect of (among other variables) smartphone usage in the weekdays and weekends on self-reported mental well being. To control for confounding effects, they included variables for sex, whether the participant was located in economic deprived areas and the ethnic background (minority group yes/no) in the model. The full model is given as:
+
+$$
+Y_i = \mu + \alpha_1 X_i + \gamma_1 Z_{1i} + \gamma_2 Z_{2i} + \gamma_3 Z_{31i} + \varepsilon_i 
+$$
+
+Based on a linear regression, we find the regression parameters, the proportions of the covariates ($Z_j$), the range of the predictor ($X$, smartphone usage during weekdays measured on a Likert scale from 0-7) and the spread of the observations ($\sigma = 9.51$). These parameters are then used to generate normally i.i.d. data. 
+
+## Simulations and results
+
+Over 1000 simulations, we apply the resampling technique. We limit this report to **K = 230** and **B = 230**. Hence, in each simulation, we have 230 values, which are based on sampling 230 datapoints from the original dataset. We choose these parameters as they result in reasonable unbiased estimates while keeping the computational time under control.
+
+```{r "simulation-options", cache.rebuild = TRUE}
+# Select K and B
+selected_K <- 230
+selected_B <- 230
+nsim <- 1000
+set.seed(123456)
+```
+
+
+### Model 1
+
+Parameters:
+```{r "model-1-parameters", cache.rebuild = TRUE}
+u <- 1
+alpha <- 5
+sigma <- 1
+trueBeta <- alpha/(sqrt(2) * sigma)
+# Model (called SCEN in script)
+SCEN <- 1
+```
+
+The following code shows the function used to calculate the numbers. 
+
+```{r "function-paral-results", cache.rebuild = TRUE}
+# Function to run in parallel
+ParalCalc <- function(sID, selected_K, selected_B, SCEN, datLoc, trueBeta){
+
+  # Function to calculate mean statistic (for bootstrap)
+  meanBoot <- function(data, indices){
+    d <- data[indices]
+    return(mean(d))
+  }
+  
+  # Names of the columns in data files, according to model
+  S1_colnames <- c("beta", "sVariance", "K", "nRSloops", "TrueBeta")
+  S2_colnames <- c("beta.X_smartph_hrs", "beta.X_sex", 
+                 "beta.X_econArea",  "beta.X_ethnic", 
+                 "sVariance.X_smartph_hrs", "sVariance.X_sex",
+                 "sVariance.X_econArea", 
+                 "sVariance.X_ethnic",  "K", "nRSloops", "TrueBeta")
+  if(SCEN == 1){
+    assign(x = 'generic_colnames', value = S1_colnames)
+  }
+  if(SCEN == 3){
+    assign(x = 'generic_colnames', value = S2_colnames)
+  }
+    
+  # Values from one simulation
+  ValSim <- read.table(file = paste0(datLoc, 'uni_beta_vector_simID_', sID, '_SCEN_', SCEN, '.txt'),
+                 col.names = generic_colnames, header = TRUE) %>% 
+                   tbl_df() %>% filter(K == selected_K & nRSloops == selected_B)
+  
+  if(SCEN == 3){
+    ValSim <- rename(ValSim, beta = beta.X_smartph_hrs, sVariance = sVariance.X_smartph_hrs)
+  }
+
+  # Gather average beta, average sandwich variance estimator and variance of beta
+  AvSan_in_sim <- ValSim %>% summarise(AvBeta_sim = mean(beta), AvsVar_sim = mean(sVariance)) %>% 
+        bind_cols(., data.frame('VarBeta_sim' = var(ValSim$beta)))
+  
+  # Use these (sandwich) averages to calculate the CI and indicator
+  CISan_in_sim <- mutate(AvSan_in_sim, 
+           sandLow = AvBeta_sim - (qnorm(p = 0.025, lower.tail = FALSE) * sqrt(AvsVar_sim)),
+           sandUp = AvBeta_sim + (qnorm(p = 0.025, lower.tail = FALSE) * sqrt(AvsVar_sim)),
+           sandInd = ifelse(trueBeta >= sandLow && trueBeta <= sandUp, 1, 0))
+  
+  # Run the bootstrap
+  boot_result <- boot(data = ValSim$beta, statistic = meanBoot, R = 1000)
+  boot_ci <- boot.ci(boot_result, type = 'bca')
+  
+  # Add bootstrap variance and indicator for bootstrap CI coverage
+  boot_in_sim <- bind_cols(CISan_in_sim, 
+        data.frame('BCaVar_sim' = var(boot_result$t),
+          'bootLow' = boot_ci$bca[4], 'bootUp' = boot_ci$bca[5])) %>%
+        mutate(bootInd = ifelse(trueBeta >= bootLow && trueBeta <= bootUp, 1, 0)) %>%
+        mutate(sim = sID)
+  
+  return(boot_in_sim)
+}
+```
+
+Now we run this function in parallel, using as much workers as possible.
+
+```{r "run-results-model-1-parallel", results = 'hide'}
+# Detect and start the workers
+P <- detectCores(logical = FALSE) # physical cores
+cl <- makeCluster(P)
+
+# Initialize them with the libraries
+clusterEvalQ(cl, library(tidyverse))
+clusterEvalQ(cl, library(boot))
+
+# Run in parallel and append results
+sim_par_results <- clusterApply(cl, 1:nsim, fun = ParalCalc, selected_K = selected_K, selected_B = selected_B, SCEN = SCEN, datLoc = datLoc, trueBeta = trueBeta)
+parallel_results <- do.call(rbind, sim_par_results)
+
+# Stop the workers
+stopCluster(cl)
+```
+
+<br>
+<br>
+
+Finally, we look at the results in which we have the data generating model parameters ($\alpha$, $u$ and $\sigma$), the average estimated $\beta$, the variance of the $\beta$ PIM estimates, the average variance within each simulation of the $\beta$ PIM estimates, the average of the sandwich variance PIM estimates, the emperical coverage of the 95% CI using the sandwich variance, the average of the bias-corrected bootstrap based variance and its emperical coverage of the 95% CI using the bootstrap procedure. 
+<br>
+<br>
+
+```{r 'model-1-results', echo = FALSE}
+Mod_1_results <- parallel_results %>% summarise('Avg(beta)' = mean(AvBeta_sim), 'Var(beta)' = var(AvBeta_sim), 
+      'Avg(Var(beta_sim))' = mean(VarBeta_sim), 'Avg(SanVar)' = mean(AvsVar_sim),
+      'EC sandwich' = mean(sandInd),
+      'Avg(BCaVar)' = mean(BCaVar_sim),  'EC BCa' = mean(bootInd))
+Mod_1_results <- bind_cols(data.frame(alpha = alpha, u = u, sigma = sigma, TrueBeta = trueBeta), Mod_1_results)
+knitr::kable(Mod_1_results)
+```
+
+
+
+### Model 2
+
+Parameters:
+```{r "model-2-parameters", cache.rebuild = TRUE}
+alpha_1 <- -0.43
+# Sigma based on dataset
+sigma <- 9.51
+trueBeta <- alpha_1/(sqrt(2) * sigma)
+# Model (called SCEN in script)
+SCEN <- 3
+```
+
+
+We run previous defined function again in parallel, using as much workers as possible.
+
+```{r "run-results-model-2-parallel", results = 'hide'}
+# Detect and start the workers
+P <- detectCores(logical = FALSE) # physical cores
+cl <- makeCluster(P)
+
+# Initialize them with the libraries
+clusterEvalQ(cl, library(tidyverse))
+clusterEvalQ(cl, library(boot))
+
+# Run in parallel and append results
+sim_par_results <- clusterApply(cl, 1:nsim, fun = ParalCalc, selected_K = selected_K, selected_B = selected_B, SCEN = SCEN, datLoc = datLoc, trueBeta = trueBeta)
+parallel_results <- do.call(rbind, sim_par_results)
+
+# Stop the workers
+stopCluster(cl)
+```
+
+<br>
+<br>
+<br>
+
+With these results: 
+
+```{r 'model-2-results', echo = FALSE}
+Mod_2_results <- parallel_results %>% summarise('Avg(beta)' = mean(AvBeta_sim), 'Var(beta)' = var(AvBeta_sim), 
+      'Avg(Var(beta_sim))' = mean(VarBeta_sim), 'Avg(SanVar)' = mean(AvsVar_sim),
+      'EC sandwich' = mean(sandInd),
+      'Avg(BCaVar)' = mean(BCaVar_sim),  'EC BCa' = mean(bootInd))
+Mod_2_results <- bind_cols(data.frame(alpha = alpha, u = u, sigma = sigma, TrueBeta = trueBeta), Mod_2_results)
+knitr::kable(Mod_2_results)
+```
+
+
+
+
+<br>
+<br>
+<br>
+<br>
+<br>
+<br>
+
+
+
+
+
+
+
+
+
