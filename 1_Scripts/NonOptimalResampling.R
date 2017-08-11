@@ -106,7 +106,13 @@ if(SCEN == 3){
   sigma <- 9.51
   trueBeta <- alpha_1/(sqrt(2) * sigma)
 }
-
+# Fourth scenario: one that should work according to Thas et al. 2012
+if(SCEN == 4){
+  alpha <- 1
+  u <- 10
+  sigma <- 5
+  trueBeta <- alpha/(sqrt(2) * sigma)
+}
 
 
 ##
@@ -128,7 +134,7 @@ if(MACHINE == "HPC"){
 	nPairs <- dim(pairs)[1]
 
 	 # Different data generating models in different scenario's
-	if(SCEN %in% c(1,2)){
+	if(SCEN %in% c(1,2,4)){
 	  # Generate predictor
 	  X <- runif(n = n, min = 0.1, max = u)
 
@@ -183,7 +189,7 @@ if(MACHINE == "HPC"){
 		# Start resampling scheme
 		for(l in 1:nRSloops){
 			# Sample rows from original data with 1/n probability (i.e. weight = NULL)
-		  if(SCEN %in% c(1,2)){
+		  if(SCEN %in% c(1,2,4)){
 		    SelectedData <- dplyr::sample_n(OrigData, size = K, replace = FALSE, weight = NULL)
 		  }
 		  if(SCEN == 3){
@@ -197,7 +203,7 @@ if(MACHINE == "HPC"){
 		  }
 
 			# Try to fit PIM. If fails, return coordinates.
-			if(SCEN %in% c(1,2)){
+			if(SCEN %in% c(1,2,4)){
   			PIMfit <- try(pim(formula = Y ~ X, data = SelectedData,
   			                  link = 'probit', model = 'difference'), silent = TRUE)
   			if(class(PIMfit) == 'try-error'){
