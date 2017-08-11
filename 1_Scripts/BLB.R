@@ -29,7 +29,7 @@ rm(list = ls())
 
 # Results directory
 ResultsDir <- 'D:/Users/Han/Dropbox/Mastat/Thesis/Results/Univariate/NonOptimalLocal'
-DataPartition <- "/Volumes/2_TB_WD_Elements_10B8_Han/PhD/BigDataPIM/BLB/DataPartition"
+DataPartition <- "/Volumes/1_5_TB_Han_HDD/Mastat/Thesis/BigDataPIM/BLB/DataPartition"
 
 # Libraries
 library(pim)
@@ -42,18 +42,13 @@ library(parallel)
 DEVELOPMENT <- FALSE
 
 # Scenario
-SCEN <- 1
+SCEN <- 3
 
 # Seed
 StartingSeed <- 11 * SCEN
 
 # Global variables: univariate simple linear regression 
 n <- 250000
-u <- 1
-alpha <- 5
-sigma <- 2
-trueBeta <- alpha/(sqrt(2) * sigma)
-
 
 # Depending on scenario, different parameter values
 if(SCEN == 1){

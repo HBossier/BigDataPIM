@@ -5,7 +5,7 @@
 #PBS -o output/output.file
 #PBS -e error/error.file
 #PBS -m a
-#PBS -l walltime=01:00:00
+#PBS -l walltime=05:00:00
 #PBS -l vmem=40GB
 #PBS -l nodes=1:ppn=1
 #
@@ -30,15 +30,15 @@ echo 'scenario ' $SCEN
 
 
 #----------------------------------------------------#
-# WHICH SIMULATION
-NSIM=1
+# WHICH SIMULATION: now in PBS_ARRAYID
+# NSIM=${1}
 #----------------------------------------------------#
 
 
 #----------------------------------------------------#
 # ARGUMENT ORDER
-# - PBS_ARRAYID is here a node for each bag
-# - SIMID
+# - PBS_ARRAYID = simulation
+# - SIMID (DEPRECATED)
 # - Results directory
 # - Machine
 # - Data location
@@ -48,7 +48,7 @@ NSIM=1
 
 #----------------------------------------------------#
 # GO TIME!
-Rscript ParBLB.R ${PBS_ARRAYID} "$NSIM" "${srcdir}"/results "HPC" "${srcdir}"/Data/SCEN_"$SCEN" "$SCEN"
+Rscript ParBLB.R ${PBS_ARRAYID} "${srcdir}"/results "HPC" "${srcdir}"/Data "$SCEN"
 #----------------------------------------------------#
 
 

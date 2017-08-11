@@ -29,24 +29,26 @@ rm(list = ls())
 
 # Take arguments from master file
 args <- commandArgs(TRUE)
+print(args)
 
 # ID of bag
-BAGID <- try(as.numeric(as.character(args)[1]), silent=TRUE)
+#BAGID <- PAIRS[ID,'Var1']
+  #try(as.numeric(as.character(args)[1]), silent=TRUE)
 
 # ID of simulation
-SIMID <- try(as.numeric(as.character(args)[2]), silent=TRUE)
+SIMID <- try(as.numeric(as.character(args)[1]), silent=TRUE)
 
 # Results
-ResultsDir <- try(as.character(args)[3], silent=TRUE)
+ResultsDir <- try(as.character(args)[2], silent=TRUE)
 
 # Which machine: HPC or LOCAL
-MACHINE <- try(as.character(input)[4],silent=TRUE)
+MACHINE <- try(as.character(args)[3],silent=TRUE)
 
 # Data location
-DATALOCATION <- try(as.character(input)[5],silent=TRUE)
+DATALOCATION <- try(as.character(args)[4],silent=TRUE)
 
 # Scenario
-SCEN <- try(as.numeric(as.character(args)[6]), silent=TRUE)
+SCEN <- try(as.numeric(as.character(args)[5]), silent=TRUE)
 
 # If no machine is specified (it gives error), then it has to be this machine!
 if(class(MACHINE)=='try-error'){
@@ -59,18 +61,20 @@ if(class(MACHINE)=='try-error'){
 }
 print(ResultsDir)
 
-# Seed
-# Starting seed
-StartingSeed <- 11 * SCEN
-set.seed(StartingSeed + (StartingSeed * ID))
-
-
 # Libraries
 library(pim)
 library(dplyr)
 library(ggplot2)
 library(nleqslv)
 library(parallel)
+
+# We run 1000 jobs, one for each simulation and deploy for loop at bag level
+Sbags <- 1:100
+
+# Seed
+# Starting seed
+StartingSeed <- 11 * SCEN
+set.seed(StartingSeed + (StartingSeed * SIMID))
 
 
 ##
@@ -98,44 +102,48 @@ if(SCEN == 3){
   trueBeta <- alpha_1/(sqrt(2) * sigma)
 }
 
-
-# Try to read in data of simulation and ID
-SelectedData <- try(read.table(paste(DATALOCATION,'/SCEN_', SCEN, '/BLBdata_scen_', SCEN,'_sim_', SIMID, '_bag_', BAGID, '.txt', sep = ''),
-                           header = TRUE), silent = TRUE)
-if(class(SelectedData) == 'try-error'){
-  print(paste('No data detected in simulation ', SIMID, '. Bag ', BAGID, sep = ''))
-}else{
-  # Try to fit PIM. If fails, return coordinates.
-  if(SCEN %in% c(1,2)){
-    PIMfit <- try(pim(formula = Y ~ X, data = SelectedData,
-                      link = 'probit', model = 'difference'), silent = TRUE)
-    if(class(PIMfit) == 'try-error'){
-      print(paste0('Error in fitting PIM at sim ',SIMID, '. Bag ',BAGID,'.'))
-    }else{
-      # Save beta value if no error.
-      PIMvalues <- PIMfit@coef
-      # Save sandwich variance estimator
-      PIMvariances <- PIMfit@vcov
-        colnames(PIMvariances) <- "sVariance.X"
+# Start bag for loop
+for(s in Sbags){
+  # Get bagID
+  BAGID <- s
+  # Try to read in data of simulation and ID
+  SelectedData <- try(read.table(paste(DATALOCATION,'/SCEN_', SCEN, '/BLBdata_scen_', SCEN,'_sim_', SIMID, '_bag_', BAGID, '.txt', sep = ''),
+                             header = TRUE), silent = TRUE)
+  if(class(SelectedData) == 'try-error'){
+    print(paste('No data detected in simulation ', SIMID, '. Bag ', BAGID, sep = ''))
+  }else{
+    # Try to fit PIM. If fails, return coordinates.
+    if(SCEN %in% c(1,2)){
+      PIMfit <- try(pim(formula = Y ~ X, data = SelectedData,
+                        link = 'probit', model = 'difference'), silent = TRUE)
+      if(class(PIMfit) == 'try-error'){
+        print(paste0('Error in fitting PIM at sim ',SIMID, '. Bag ',BAGID,'.'))
+      }else{
+        # Save beta value if no error.
+        PIMvalues <- PIMfit@coef
+        # Save sandwich variance estimator
+        PIMvariances <- PIMfit@vcov
+          colnames(PIMvariances) <- "sVariance.X"
+      }
     }
-  }
-  # Different model for scenario 3
-  if(SCEN == 3){
-    PIMfit <- try(pim(formula = Y ~ X_smartph_hrs + X_sex + X_econArea + X_ethnic, data = SelectedData,
-                      link = 'probit', model = 'difference'), silent = TRUE)
-    if(class(PIMfit) == 'try-error'){
-      print(paste0('Error in fitting PIM at sim ',SIMID, '. Bag ',BAGID,'.'))
-    }else{
-      # Names of the objects
-      namesObject <- tidy(PIMfit@coef) %>% data.table::transpose() %>% slice(.,1)
-      
-      # Save beta value if no error.
-      PIMvalues <- tidy(PIMfit@coef) %>% data.table::transpose() %>% slice(.,2)
-      names(PIMvalues) <- namesObject
-      
-      # Save sandwich variance estimator (only variance on diagonal)
-      PIMvariances <- tidy(diag(PIMfit@vcov)) %>% data.table::transpose() %>% slice(2)
-      names(PIMvariances) <- namesObject
+    # Different model for scenario 3
+    if(SCEN == 3){
+      PIMfit <- try(pim(formula = Y ~ X_smartph_hrs + X_sex + X_econArea + X_ethnic, data = SelectedData,
+                        link = 'probit', model = 'difference'), silent = TRUE)
+      if(class(PIMfit) == 'try-error'){
+        print(paste0('Error in fitting PIM at sim ',SIMID, '. Bag ',BAGID,'.'))
+      }else{
+        # Names of the objects
+        namesObject <- broom::tidy(PIMfit@coef) %>% data.table::transpose() %>% slice(.,1)
+        
+        # Save beta value if no error.
+        PIMvalues <- broom::tidy(PIMfit@coef) %>% data.table::transpose() %>% slice(.,2)
+        names(PIMvalues) <- namesObject
+        
+        # Save sandwich variance estimator (only variance on diagonal)
+        PIMvariances <- broom::tidy(diag(PIMfit@vcov)) %>% data.table::transpose() %>% slice(2)
+        names(PIMvariances) <- namesObject
+      }
     }
     
     # Collect estimated beta values and variance with info about simulation and bag
@@ -144,12 +152,10 @@ if(class(SelectedData) == 'try-error'){
                              Bag = BAGID,
                              Sim = SIMID,
                              TrueBeta = trueBeta)
+    # Write results with simulation and bag
+    write.table(BetaValues, file = paste(ResultsDir,'/SCEN_', SCEN, '/', SIMID, '/BLB_beta_SCEN_', SCEN ,'_simID_', SIMID, '_bagID_', BAGID, '.txt', sep = ''), 
+                row.names = FALSE, col.names = TRUE)
   }
-  
-  # Write results with simulation and bag
-  write.table(BetaValues, file = paste(ResultsDir,'/SCEN_', SCEN, '/', SIMID, '/BLB_beta_SCEN_', SCEN ,'_simID_', SIMID, '_bagID_', BAGID, '.txt', sep = ''), 
-              row.names = FALSE, col.names = TRUE)
 }
-
 
 
