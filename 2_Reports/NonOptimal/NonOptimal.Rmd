@@ -290,6 +290,9 @@ nsim <- 1000
 # Confidence level (for CI section)
 level <- 0.95
 
+# Sample size
+n <- 250000
+
 # Vector of number of resampling loops
 nRSloops_vec <- floor(seq(10,1000,length.out = 10))
 
@@ -600,7 +603,7 @@ boot_CI_coverage <- do.call(rbind, boot_par_results)
 stopCluster(cl)
 ```
 
-```{r "table-EC-bootstrap-model-1", echo = FALSE}
+```{r "table-EC-bootstrap-model-1", echo = FALSE, cache.rebuild = TRUE}
 resTable_tmp <- boot_CI_coverage %>% ungroup() %>% group_by(K, nRSloops) %>% summarise(EC = round(mean(coverage), 3))
 resTable <- matrix(resTable_tmp$EC, ncol = length(nRSloops_vec), byrow = TRUE)
 colnames(resTable) <- paste('B = ', nRSloops_vec, sep = '')
@@ -653,55 +656,76 @@ str(boot.ci(BootResults, type = 'bca'))
 unlist(boot.ci(BootResults, type = 'bca'))[c('bca4', 'bca5')]
 boot.ci(BootResults, type = 'bca')$bca[4]
 
+alpha_1 <- -0.43
+# Sigma based on dataset
+sigma <- 9.51
+trueBeta <- alpha_1/(sqrt(2) * sigma)
+# Model (called SCEN in script)
+SCEN <- 3
+S3_colnames <- c("beta.X_smartph_hrs", "beta.X_sex", 
+                 "beta.X_econArea",  "beta.X_ethnic", 
+                 "sVariance.X_smartph_hrs", "sVariance.X_sex",
+                 "sVariance.X_econArea", 
+                 "sVariance.X_ethnic",  "K", "nRSloops", "TrueBeta")
 
-bootVector <- sandwichVector <- sandwichIndVector <- lowBoundVarVector <- SEbootVector <- SEVector <- upBoundVarVector <- c()
 TrueBeta <- 3.53534
-for(i in 1:250){
+TrueBeta <- -0.03197223
+
+bootVector <- sandwichVector <- sandwichIndVector <- 
+    lowBoundVarVector <- SEbootVector <- SEVector <- upBoundVarVector <- BothAvgVector <- c()
+for(i in 1:500){
   if(i == 250) print('25%')
   if(i == 500) print('50%')
   if(i == 750) print('75%')
   ValSim <- read.table(file = paste0(datLoc, 'uni_beta_vector_simID_', i, '_SCEN_', SCEN, '.txt'),
-         col.names = c("beta", "sVariance", "K", "nRSloops", "TrueBeta"), header = TRUE) %>% 
+         col.names = S3_colnames, header = TRUE) %>% 
            tbl_df()
-  test <- ValSim %>% group_by(K, nRSloops) %>% filter(K == 10 & nRSloops == 10)
-  
-  # Bootstrap
-  BootResults <- boot(data = test$beta, statistic = meanBoot, R = 1000)
-  boot_ci <- boot.ci(BootResults, type = 'norm')
-  bootVector <- c(bootVector, ifelse(TrueBeta >= boot_ci$norm[2] & TrueBeta <= boot_ci$norm[3], 1, 0))
-  
-  # SE of bootstrap
-  seBootLow <- mean(test$beta) - (qnorm(p = ((1 - level)/2), lower.tail = FALSE) * sd(BootResults$t))
-  seBootUp <- mean(test$beta) + (qnorm(p = ((1 - level)/2), lower.tail = FALSE) * sd(BootResults$t))
-  SEbootVector <- c(SEbootVector, ifelse(TrueBeta >= seBootLow & TrueBeta <= seBootUp, 1, 0))
-  
-  # SE through sd of resamples
-  seLow <- mean(test$beta) - (qnorm(p = ((1 - level)/2), lower.tail = FALSE) * sd(test$beta))
-  seUp <- mean(test$beta) + (qnorm(p = ((1 - level)/2), lower.tail = FALSE) * sd(test$beta))
-  SEVector <- c(SEVector, ifelse(TrueBeta >= seLow & TrueBeta <= seUp, 1, 0))
-  
-  # Mean of sandwich estimated variance
-  sLow <- mean(test$beta) - (qnorm(p = ((1 - level)/2), lower.tail = FALSE) * sqrt(mean(test$sVariance)))
-  sUp <- mean(test$beta) + (qnorm(p = ((1 - level)/2), lower.tail = FALSE) * sqrt(mean(test$sVariance)))
-  sandwichVector <- c(sandwichVector, ifelse(TrueBeta >= sLow & TrueBeta <= sUp, 1, 0))
-  
-  # Mean of CI bounds
-  WithCI <- mutate(test, CIlow = beta - (qnorm(p = ((1 - level)/2), lower.tail = FALSE) * sqrt(sVariance))) %>%
-              mutate(CIup = beta + (qnorm(p = ((1 - level)/2), lower.tail = FALSE) * sqrt(sVariance)))
-  sandwichIndVector <- c(sandwichIndVector, ifelse(TrueBeta >= mean(WithCI$CIlow) & TrueBeta <= mean(WithCI$CIup), 1, 0))
-  
-  # Lower bound of bootstrap on sandwich variance
-  varBoot <- boot(data = test$sVariance, statistic = meanBoot, R = 1000)
-  lowerbound <- boot.ci(varBoot, type = 'norm')$norm[2]
-  lowBoundVar <- mean(test$beta) - (qnorm(p = ((1 - level)/2), lower.tail = FALSE) * sqrt(lowerbound))
-  upBoundVar <- mean(test$beta) + (qnorm(p = ((1 - level)/2), lower.tail = FALSE) * sqrt(lowerbound))
-  lowBoundVarVector <- c(lowBoundVarVector, ifelse(TrueBeta >= lowBoundVar & TrueBeta <= upBoundVar, 1, 0))
-  
-  # Upper bound of bootstrap on sandwich variance
-  upperbound <- boot.ci(varBoot, type = 'norm')$norm[3]
-  lowUPBoundVar <- mean(test$beta) - (qnorm(p = ((1 - level)/2), lower.tail = FALSE) * sqrt(upperbound))
-  upUPBoundVar <- mean(test$beta) + (qnorm(p = ((1 - level)/2), lower.tail = FALSE) * sqrt(upperbound))
-  upBoundVarVector <- c(upBoundVarVector, ifelse(TrueBeta >= lowUPBoundVar & TrueBeta <= upUPBoundVar, 1, 0))
+  test <- ValSim %>% group_by(K, nRSloops) %>% filter(K == 230 & nRSloops == 230)
+  test <- rename(test, beta = beta.X_smartph_hrs, sVariance = sVariance.X_smartph_hrs)
+
+  #   # Bootstrap
+  # BootResults <- boot(data = test$beta, statistic = meanBoot, R = 1000)
+  # boot_ci <- boot.ci(BootResults, type = 'norm')
+  # bootVector <- c(bootVector, ifelse(TrueBeta >= boot_ci$norm[2] & TrueBeta <= boot_ci$norm[3], 1, 0))
+  # 
+  # # SE of bootstrap
+  # seBootLow <- mean(test$beta) - (qnorm(p = ((1 - level)/2), lower.tail = FALSE) * sd(BootResults$t))
+  # seBootUp <- mean(test$beta) + (qnorm(p = ((1 - level)/2), lower.tail = FALSE) * sd(BootResults$t))
+  # SEbootVector <- c(SEbootVector, ifelse(TrueBeta >= seBootLow & TrueBeta <= seBootUp, 1, 0))
+  # 
+  # # SE through sd of resamples
+  # seLow <- mean(test$beta) - (qnorm(p = ((1 - level)/2), lower.tail = FALSE) * sd(test$beta))
+  # seUp <- mean(test$beta) + (qnorm(p = ((1 - level)/2), lower.tail = FALSE) * sd(test$beta))
+  # SEVector <- c(SEVector, ifelse(TrueBeta >= seLow & TrueBeta <= seUp, 1, 0))
+  # 
+  # # Mean of sandwich estimated variance
+  # sLow <- mean(test$beta) - (qnorm(p = ((1 - level)/2), lower.tail = FALSE) * sqrt(mean(test$sVariance)))
+  # sUp <- mean(test$beta) + (qnorm(p = ((1 - level)/2), lower.tail = FALSE) * sqrt(mean(test$sVariance)))
+  # sandwichVector <- c(sandwichVector, ifelse(TrueBeta >= sLow & TrueBeta <= sUp, 1, 0))
+  # 
+  # # Mean of CI bounds
+  # WithCI <- mutate(test, CIlow = beta - (qnorm(p = ((1 - level)/2), lower.tail = FALSE) * sqrt(sVariance))) %>%
+  #             mutate(CIup = beta + (qnorm(p = ((1 - level)/2), lower.tail = FALSE) * sqrt(sVariance)))
+  # sandwichIndVector <- c(sandwichIndVector, ifelse(TrueBeta >= mean(WithCI$CIlow) & TrueBeta <= mean(WithCI$CIup), 1, 0))
+  # 
+  # # Lower bound of bootstrap on sandwich variance
+  # varBoot <- boot(data = test$sVariance, statistic = meanBoot, R = 1000)
+  # lowerbound <- boot.ci(varBoot, type = 'norm')$norm[2]
+  # lowBoundVar <- mean(test$beta) - (qnorm(p = ((1 - level)/2), lower.tail = FALSE) * sqrt(lowerbound))
+  # upBoundVar <- mean(test$beta) + (qnorm(p = ((1 - level)/2), lower.tail = FALSE) * sqrt(lowerbound))
+  # lowBoundVarVector <- c(lowBoundVarVector, ifelse(TrueBeta >= lowBoundVar & TrueBeta <= upBoundVar, 1, 0))
+  # 
+  # # Upper bound of bootstrap on sandwich variance
+  # upperbound <- boot.ci(varBoot, type = 'norm')$norm[3]
+  # lowUPBoundVar <- mean(test$beta) - (qnorm(p = ((1 - level)/2), lower.tail = FALSE) * sqrt(upperbound))
+  # upUPBoundVar <- mean(test$beta) + (qnorm(p = ((1 - level)/2), lower.tail = FALSE) * sqrt(upperbound))
+  # upBoundVarVector <- c(upBoundVarVector, ifelse(TrueBeta >= lowUPBoundVar & TrueBeta <= upUPBoundVar, 1, 0))
+  # 
+  # Calculate CI on each datapoint, using sandwich variance
+  BothAvg_tmp <- mutate(test,  sVarLow = beta - (qnorm(0.025, lower.tail = FALSE) * sqrt(sVariance)), 
+                sVarUp = beta + (qnorm(0.025, lower.tail = FALSE) * sqrt(sVariance)))
+  BothAvg <- summarise(BothAvg_tmp, AvgLow = mean(sVarLow, na.rm = TRUE), AvgUp = mean(sVarUp, na.rm = TRUE))
+  BothAvgVector <- c(BothAvgVector, ifelse(TrueBeta >= BothAvg$AvgLow && TrueBeta <= BothAvg$AvgUp, 1, 0))
 }
 
 mean(bootVector)
@@ -711,6 +735,97 @@ mean(sandwichVector)
 mean(sandwichIndVector)
 mean(lowBoundVarVector)
 mean(upBoundVarVector)
+mean(BothAvgVector)
+
+avgBeta <- avgVariance <- c()
+TrueBeta <- -0.03197223
+# Check distribution of beta 
+san_BothAvgVector <- norm_BothAvg <- norm_tAvg <- c()
+for(i in 1:100){
+  if(i == 250) print('25%')
+  if(i == 500) print('50%')
+  if(i == 750) print('75%')
+  ValSim <- read.table(file = paste0(datLoc, 'uni_beta_vector_simID_', i, '_SCEN_', SCEN, '.txt'),
+         col.names = S3_colnames, header = TRUE) %>% 
+           tbl_df() %>% select(-c(beta.X_sex, beta.X_econArea, beta.X_ethnic,sVariance.X_sex, sVariance.X_econArea, sVariance.X_ethnic))
+  DataSim <- ValSim %>% group_by(K, nRSloops) %>% filter(K == 230 & nRSloops == 1000) %>%
+      rename(beta = beta.X_smartph_hrs, sVariance = sVariance.X_smartph_hrs)
+  
+  # Average beta in vector
+  avgBeta <- c(avgBeta, summarise(DataSim, AvgBeta = mean(beta, na.rm = TRUE))$AvgBeta)
+  
+  # Average variance estimator
+  avgVariance <- c(avgVariance, summarise(DataSim, AvgVar = mean(sVariance, na.rm = TRUE))$AvgVar)
+
+  # Calculate CI on each datapoint, using sandwich variance
+  san_BothAvg_tmp <- mutate(DataSim,  sVarLow = beta - (qnorm(0.025, lower.tail = FALSE) * sqrt(sVariance)),
+                sVarUp = beta + (qnorm(0.025, lower.tail = FALSE) * sqrt(sVariance)))
+    # Now construct one CI using means of both bounds
+    san_BothAvg <- summarise(san_BothAvg_tmp, AvgLow = mean(sVarLow, na.rm = TRUE), AvgUp = mean(sVarUp, na.rm = TRUE))
+    san_BothAvgVector <- c(san_BothAvgVector, ifelse(TrueBeta >= san_BothAvg$AvgLow && TrueBeta <= san_BothAvg$AvgUp, 1, 0))
+    
+  # CI using SD of data and normal quantiles and using t-quantiles
+      # Formula = sd/sqrt(n) for some strange reason (I expected sd of beta being equal to se)
+  norm_tmp <- mutate(DataSim,  
+                    CIlow = beta - (qnorm(0.025, lower.tail = FALSE) * (sd(beta)/(sqrt(K - 1)))),
+                    CIup = beta + (qnorm(0.025, lower.tail = FALSE) * (sd(beta)/(sqrt(K - 1)))),
+                    type = 'norm') %>% group_by(K, TrueBeta, type) %>%
+              summarise(AvgBeta = mean(beta, na.rm = TRUE),
+                    AvgLow = mean(CIlow, na.rm = TRUE), 
+                    AvgUp = mean(CIup, na.rm = TRUE)) %>% ungroup() %>%
+              mutate(coverage_ind = ifelse(TrueBeta >= AvgLow && TrueBeta <= AvgUp, 1, 0),
+                    sim = i)
+  t_tmp <- mutate(DataSim,
+                    CIlow = beta - (qt(0.025, df = (K - 1), lower.tail = FALSE) * (sd(beta)/(sqrt(K - 1)))),
+                    CIup = beta + (qt(0.025, df = (K - 1), lower.tail = FALSE) * (sd(beta)/(sqrt(K - 1)))),
+                    type = 't') %>% group_by(K, TrueBeta, type) %>%
+              summarise(AvgBeta = mean(beta, na.rm = TRUE),
+                    AvgLow = mean(CIlow, na.rm = TRUE), 
+                    AvgUp = mean(CIup, na.rm = TRUE)) %>% ungroup() %>%
+              mutate(coverage_ind = ifelse(TrueBeta >= AvgLow && TrueBeta <= AvgUp, 1, 0),
+                    sim = i)
+  
+  # CI using mean of sandwich variance
+  avgSvar_tmp <- mutate(DataSim,
+                    CIlow = beta - (qnorm(0.025, lower.tail = FALSE) * (sqrt(mean(sVariance))/(sqrt(K/250000)))),
+                    CIup = beta + (qnorm(0.025, lower.tail = FALSE) * (sqrt(mean(sVariance))/(sqrt(K/250000)))),
+                    type = 'mean_sVar') %>% group_by(K, TrueBeta, type) %>%
+              summarise(AvgBeta = mean(beta, na.rm = TRUE),
+                    AvgLow = mean(CIlow, na.rm = TRUE), 
+                    AvgUp = mean(CIup, na.rm = TRUE)) %>% ungroup() %>%
+              mutate(coverage_ind = ifelse(TrueBeta >= AvgLow && TrueBeta <= AvgUp, 1, 0),
+                    sim = i)
+  
+    # Again, construct CI by averaging endpoints
+    norm_tAvg <- bind_rows(norm_tAvg,norm_tmp, t_tmp, avgSvar_tmp)
+}
+
+# Plot
+norm_tAvg %>% 
+  ggplot(., aes(x = trueBeta)) + geom_vline(xintercept = trueBeta) +
+  geom_point(aes(x = AvgBeta, y = sim)) + 
+  geom_segment(aes(x = AvgLow, xend = AvgUp, y = sim, yend = sim)) + 
+  facet_wrap( ~ type) +
+  scale_x_continuous("beta") + scale_y_continuous("simulation") +
+  ggtitle("95% CI around beta PIM estimate")
+
+# EC
+group_by(norm_tAvg, type) %>% summarise(EC = mean(coverage_ind))
+
+# Plot of individual sandwich variances
+san_BothAvg_tmp %>% mutate(subject = seq(1:dim(san_BothAvg_tmp)[1])) %>% slice(1:100) %>%
+  ggplot(., aes(x = trueBeta, y = subject)) + geom_vline(xintercept = trueBeta) +
+  geom_point(aes(x = beta)) + 
+  geom_segment(aes(x = sVarUp, xend = sVarLow, y = subject, yend = subject)) 
+
+# Average of sandwich variance
+norm_tAvg %>% 
+  ggplot(., aes(x = trueBeta)) + geom_vline(xintercept = trueBeta) +
+  geom_point(aes(x = AvgBeta, y = sim)) + 
+  geom_segment(aes(x = AvgLow, xend = AvgUp, y = sim, yend = sim)) + 
+  facet_wrap( ~ type) +
+  scale_x_continuous("beta") + scale_y_continuous("simulation") +
+  ggtitle("95% CI around beta PIM estimate")
 
 avBeta <- c()
 for(i in 1:250){
@@ -821,7 +936,185 @@ ValSim %>% filter(K == c(10,120) & nRSloops == c(10,120)) %>%
   by_slice(~ describe(.x$price), .collate = "rows")
 do(BootCI(OrigData = .$beta))
 ?by_slice
+
+# norm_tAvg %>% filter(type == 't' & K == 230) %>% group_by(K,nRSloops)
+# ifelse(3.535534 >= 3.352112 &&  3.535534 <= 3.539192, 1,0)
+# 
+# tes <- filter(ValSim, K == 230 & nRSloops == 230)
+# test <- mutate(tes,
+#           CIlow = beta - (qt(0.025, df = (K - 1), lower.tail = FALSE) * (sd(beta)/(sqrt(K - 1)))),
+#           CIup = beta + (qt(0.025, df = (K - 1), lower.tail = FALSE) * (sd(beta)/(sqrt(K - 1)))),
+#           type = 't') 
+# View(test)
+# ind_c <- c()
+# for(j in 1:dim(test)[1]){
+#   ind_c <- c(ind_c, ifelse(test[j,'TrueBeta'] >= test[j,'CIlow'] && test[j, 'TrueBeta'] <= test[j,'CIup'], 1,0))
+# }
+# 
+# 
+# %>% group_by(K, nRSloops, TrueBeta, type) %>%
+#     summarise(AvgBeta = mean(beta, na.rm = TRUE),
+#           AvgLow = mean(CIlow, na.rm = TRUE),
+#           AvgUp = mean(CIup, na.rm = TRUE)) %>% ungroup()
+# test %>% rowwise() %>% mutate(coverage_ind = ifelse(TrueBeta >= AvgLow && TrueBeta <= AvgUp, 1, 0)) %>% View()
+#            ,
+#           sim = i)
+# %>% summarise(EC = mean(coverage_ind))
+#   View()
+
+# norm_tAvg %>% filter(type == 't' & K == 230) %>% group_by(K,nRSloops)
+# ifelse(3.535534 >= 3.352112 &&  3.535534 <= 3.539192, 1,0)
+# 
+# tes <- filter(ValSim, K == 230 & nRSloops == 230)
+# test <- mutate(tes,
+#           CIlow = beta - (qt(0.025, df = (K - 1), lower.tail = FALSE) * (sd(beta)/(sqrt(K - 1)))),
+#           CIup = beta + (qt(0.025, df = (K - 1), lower.tail = FALSE) * (sd(beta)/(sqrt(K - 1)))),
+#           type = 't') 
+# View(test)
+# ind_c <- c()
+# for(j in 1:dim(test)[1]){
+#   ind_c <- c(ind_c, ifelse(test[j,'TrueBeta'] >= test[j,'CIlow'] && test[j, 'TrueBeta'] <= test[j,'CIup'], 1,0))
+# }
+# 
+# 
+# %>% group_by(K, nRSloops, TrueBeta, type) %>%
+#     summarise(AvgBeta = mean(beta, na.rm = TRUE),
+#           AvgLow = mean(CIlow, na.rm = TRUE),
+#           AvgUp = mean(CIup, na.rm = TRUE)) %>% ungroup()
+# test %>% rowwise() %>% mutate(coverage_ind = ifelse(TrueBeta >= AvgLow && TrueBeta <= AvgUp, 1, 0)) %>% View()
+#            ,
+#           sim = i)
+# %>% summarise(EC = mean(coverage_ind))
+#   View()
+
 ```
+
+##### Student - t confidence intervals
+
+What happens if we consider the PIM $\beta$ estimates as **K** i.i.d. datapoints and construct a $t$-distributed CI interval? Using the standard deviation of the estimated $\beta$ parameters, we get:
+
+$$
+[\bar{\beta} \pm t_{\alpha/2, K-1} sd(\beta)/\sqrt{(K - 1)}]
+$$
+Note, this is not really correct. But we just want to see what effect it has on the emperical coverage.
+
+
+```{r "calculate-student-t-CI-model-1"}
+norm_tAvg <- c()
+# Read in data (again, sigh)
+for(i in 1:nsim){
+  ValSim <- read.table(file = paste0(datLoc, 'uni_beta_vector_simID_', i, '_SCEN_', SCEN, '.txt'),
+         col.names = c("beta", "sVariance", "K", "nRSloops", "TrueBeta"), header = TRUE) %>% 
+        tbl_df()
+  # CI using SD of data and normal quantiles and using t-quantiles
+    # Formula = sd/sqrt(n) for some strange reason (I expected sd of beta being equal to se)
+  norm_tmp <- ValSim %>% group_by(K, nRSloops) %>% 
+          mutate(
+          CIlow = beta - (qnorm(0.025, lower.tail = FALSE) * (sd(beta)/(sqrt(K - 1)))),
+          CIup = beta + (qnorm(0.025, lower.tail = FALSE) * (sd(beta)/(sqrt(K - 1)))),
+          type = 'norm') %>% group_by(K, nRSloops, TrueBeta, type) %>%
+    summarise(AvgBeta = mean(beta, na.rm = TRUE),
+          AvgLow = mean(CIlow, na.rm = TRUE), 
+          AvgUp = mean(CIup, na.rm = TRUE)) %>% ungroup() %>% rowwise() %>% 
+    mutate(coverage_ind = ifelse(TrueBeta >= AvgLow && TrueBeta <= AvgUp, 1, 0),
+          sim = i)
+  t_tmp <- ValSim %>% group_by(K, nRSloops) %>% 
+          mutate(
+          CIlow = beta - (qt(0.025, df = (K - 1), lower.tail = FALSE) * (sd(beta)/(sqrt(K - 1)))),
+          CIup = beta + (qt(0.025, df = (K - 1), lower.tail = FALSE) * (sd(beta)/(sqrt(K - 1)))),
+          type = 't') %>% group_by(K, nRSloops, TrueBeta, type) %>%
+    summarise(AvgBeta = mean(beta, na.rm = TRUE),
+          AvgLow = mean(CIlow, na.rm = TRUE), 
+          AvgUp = mean(CIup, na.rm = TRUE)) %>% ungroup() %>% rowwise() %>% 
+    mutate(coverage_ind = ifelse(TrueBeta >= AvgLow && TrueBeta <= AvgUp, 1, 0),
+          sim = i)
+  
+  # Construct general CI by averaging endpoints
+  norm_tAvg <- bind_rows(norm_tAvg,norm_tmp, t_tmp)
+}
+```
+
+```{r "visualize-student-t-CI-model-1"}
+# Plot
+norm_tAvg %>% filter(type == 't' & K == 1000 & nRSloops == 1000) %>% 
+  slice(round(seq(1,nsim,length.out = 50),0)) %>%
+   ggplot(., aes(x = TrueBeta)) + geom_vline(aes(xintercept = TrueBeta)) +
+   geom_point(aes(x = AvgBeta, y = sim)) + 
+   geom_segment(aes(x = AvgLow, xend = AvgUp, y = sim, yend = sim)) + 
+   scale_x_continuous("beta") + scale_y_continuous("simulation") +
+   ggtitle("95% CI around beta PIM estimate")
+
+resTable_tmp <- norm_tAvg %>% filter(type == 't') %>% group_by(K,nRSloops) %>% summarise(EC = mean(coverage_ind))
+resTable <- matrix(resTable_tmp$EC, ncol = length(nRSloops_vec), byrow = TRUE)
+colnames(resTable) <- paste('B = ', nRSloops_vec, sep = '')
+rownames(resTable) <- paste('K = ', K_vec, sep = '')
+knitr::kable(resTable)
+```
+
+
+##### Bootstrap m-out-of n
+
+Essentially, the non-optimal subsampling algorithm can also be consider as bootstrapping m-out-of n, with m $<<$ n. In our case, m corresponds to **K** the subsample size. 
+
+However, in the bootstrap algorithm, it is essentially to scale the CI in order to match the variability of the full dataset. This scaling is done by multiplying the standard error of the estimator ($se(\hat\theta_n)$) through:
+
+$$
+se(\hat\theta_n) \approx se(\theta^*_k) \times \sqrt{\frac{K}{n}}
+$$
+In which $se(\theta^*_k)$ is equal to the standard deviation of the sampling distribution for each iteration **B**. 
+
+We shall try this here.
+
+```{r "calculate-m-out-of-n-CI-model-1", cache = TRUE}
+scaledSD <- data.frame() %>% tbl_df()
+# Read in data
+for(i in 1:nsim){
+  ValSim <- read.table(file = paste0(datLoc, 'uni_beta_vector_simID_', i, '_SCEN_', SCEN, '.txt'),
+         col.names = c("beta", "sVariance", "K", "nRSloops", "TrueBeta"), header = TRUE) %>% 
+        tbl_df()
+  # CI using SD of beta with scaling
+  sdScale_tmp <- ValSim %>% group_by(K, nRSloops, TrueBeta) %>% 
+          summarise(AvgBeta = mean(beta, na.rm = TRUE),  
+                    sdBeta = sd(beta, na.rm = TRUE)) %>%
+          mutate(CIlow =  AvgBeta - (qnorm(0.025, lower.tail = FALSE) * sdBeta * sqrt(K/n)),
+              CIup = AvgBeta + (qnorm(0.025, lower.tail = FALSE) * sdBeta * sqrt(K/n)),
+              type = 'scaledSD') %>% 
+          ungroup() %>% rowwise() %>% 
+          mutate(coverage_ind = ifelse(TrueBeta >= CIlow && TrueBeta <= CIup, 1, 0),
+              sim = i)
+  
+  # Collect the values over all simulations
+  scaledSD <- bind_rows(scaledSD,sdScale_tmp)
+}
+```
+
+
+```{r "plot-scaled-CI-model-1", echo = FALSE, fig.align = 'center', fig.width = 5, fig.height=6}
+ToPlotCI <- scaledSD %>%  filter(K %in% c(230, 1000) & nRSloops %in% c(230, 1000)) %>% 
+  group_by(K, nRSloops) %>%
+  slice(seq(1, nsim, length.out = 100)) %>% ungroup()
+ToPlotCI$K <- factor(ToPlotCI$K, levels = c(230, 1000), labels = c('K = 230', 'K = 1000'))
+ToPlotCI$nRSloops <- factor(ToPlotCI$nRSloops, levels = c(230, 1000), labels = c('B = 230', 'B = 1000'))
+
+ggplot(ToPlotCI, aes(x = TrueBeta)) + geom_vline(aes(xintercept = TrueBeta), size = .8, alpha = .8) +
+   geom_point(aes(x = AvgBeta, y = sim, colour = factor(coverage_ind)), size = 0.5) + 
+   geom_segment(aes(x = CIlow, xend = CIup, y = sim, yend = sim, colour = factor(coverage_ind), alpha = factor(coverage_ind)), size = 0.9) + 
+  facet_wrap(K ~ nRSloops, dir = 'v') +
+  scale_alpha_manual("Contains true value", values = c(1,0.8), labels = c("NO", "YES")) +
+  scale_colour_manual("Contains true value", values = c('#d95f02', '#1b9e77'), labels = c("NO", "YES")) +
+   scale_x_continuous("beta") + scale_y_continuous("simulation") +
+  theme(legend.position="bottom") +
+   ggtitle("100 random selected simulations with the 95% CI")
+```
+
+```{r "table-scaled-sd-model-1"}
+scaledSDTable_tmp <- scaledSD %>% group_by(K,nRSloops) %>% summarise(EC = mean(coverage_ind))
+scaledSDTable <- matrix(scaledSDTable_tmp$EC, ncol = length(nRSloops_vec), byrow = TRUE)
+colnames(scaledSDTable) <- paste('B = ', nRSloops_vec, sep = '')
+rownames(scaledSDTable) <- paste('K = ', K_vec, sep = '')
+knitr::kable(scaledSDTable)
+```
+
 
 
 ### Model 2
@@ -1089,7 +1382,7 @@ boot_CI_coverage <- do.call(rbind, boot_par_results)
 stopCluster(cl)
 ```
 
-```{r "table-EC-bootstrap-model-3", echo = FALSE}
+```{r "table-EC-bootstrap-model-3", echo = FALSE, cache.rebuild = TRUE}
 resTable_tmp <- boot_CI_coverage %>% ungroup() %>% group_by(K, nRSloops) %>% summarise(EC = round(mean(coverage), 3))
 resTable <- matrix(resTable_tmp$EC, ncol = length(nRSloops_vec), byrow = TRUE)
 colnames(resTable) <- paste('B = ', nRSloops_vec, sep = '')
@@ -1098,3 +1391,116 @@ knitr::kable(resTable)
 ```
 
 > Somewhat better.
+
+
+##### Student - t confidence intervals
+
+
+```{r "calculate-student-t-CI-model-3"}
+norm_tAvg <- c()
+# Read in data (again, sigh)
+for(i in 1:nsim){
+  ValSim <- read.table(file = paste0(datLoc, 'uni_beta_vector_simID_', i, '_SCEN_', SCEN, '.txt'),
+         col.names = S3_colnames, header = TRUE) %>% 
+        tbl_df()
+  ValSim <- rename(ValSim, beta = beta.X_smartph_hrs)
+  # CI using SD of data and normal quantiles and using t-quantiles
+    # Formula = sd/sqrt(n) for some strange reason (I expected sd of beta being equal to se)
+  norm_tmp <- ValSim %>% group_by(K, nRSloops) %>% 
+          mutate(
+          CIlow = beta - (qnorm(0.025, lower.tail = FALSE) * (sd(beta)/(sqrt(K - 1)))),
+          CIup = beta + (qnorm(0.025, lower.tail = FALSE) * (sd(beta)/(sqrt(K - 1)))),
+          type = 'norm') %>% group_by(K, nRSloops, TrueBeta, type) %>%
+    summarise(AvgBeta = mean(beta, na.rm = TRUE),
+          AvgLow = mean(CIlow, na.rm = TRUE), 
+          AvgUp = mean(CIup, na.rm = TRUE)) %>% ungroup() %>% rowwise() %>% 
+    mutate(coverage_ind = ifelse(TrueBeta >= AvgLow && TrueBeta <= AvgUp, 1, 0),
+          sim = i)
+  t_tmp <- ValSim %>% group_by(K, nRSloops) %>% 
+          mutate(
+          CIlow = beta - (qt(0.025, df = (K - 1), lower.tail = FALSE) * (sd(beta)/(sqrt(K - 1)))),
+          CIup = beta + (qt(0.025, df = (K - 1), lower.tail = FALSE) * (sd(beta)/(sqrt(K - 1)))),
+          type = 't') %>% group_by(K, nRSloops, TrueBeta, type) %>%
+    summarise(AvgBeta = mean(beta, na.rm = TRUE),
+          AvgLow = mean(CIlow, na.rm = TRUE), 
+          AvgUp = mean(CIup, na.rm = TRUE)) %>% ungroup() %>% rowwise() %>% 
+    mutate(coverage_ind = ifelse(TrueBeta >= AvgLow && TrueBeta <= AvgUp, 1, 0),
+          sim = i)
+  
+  # Construct general CI by averaging endpoints
+  norm_tAvg <- bind_rows(norm_tAvg,norm_tmp, t_tmp)
+}
+```
+
+```{r "visualize-student-t-CI-model-3", fig.align = 'center'}
+# Plot
+norm_tAvg %>% filter(type == 't' & K == 120 & nRSloops == 120) %>% 
+  slice(round(seq(1,nsim,length.out = 50),0)) %>%
+   ggplot(., aes(x = TrueBeta)) + geom_vline(aes(xintercept = TrueBeta)) +
+   geom_point(aes(x = AvgBeta, y = sim)) + 
+   geom_segment(aes(x = AvgLow, xend = AvgUp, y = sim, yend = sim)) + 
+   scale_x_continuous("beta") + scale_y_continuous("simulation") +
+   ggtitle("95% CI around beta PIM estimate")
+
+resTable_tmp <- norm_tAvg %>% filter(type == 't') %>% group_by(K,nRSloops) %>% summarise(EC = mean(coverage_ind))
+resTable <- matrix(resTable_tmp$EC, ncol = length(nRSloops_vec), byrow = TRUE)
+colnames(resTable) <- paste('B = ', nRSloops_vec, sep = '')
+rownames(resTable) <- paste('K = ', K_vec, sep = '')
+knitr::kable(resTable)
+```
+
+##### Bootstrap m-out-of n
+
+Again, scale the CI according to bootstrap m-out-of n theory.
+
+```{r "calculate-m-out-of-n-CI-model-3", cache = TRUE}
+scaledSD <- data.frame() %>% tbl_df()
+# Read in data (again, sigh)
+for(i in 1:nsim){
+  ValSim <- read.table(file = paste0(datLoc, 'uni_beta_vector_simID_', i, '_SCEN_', SCEN, '.txt'),
+         col.names = S3_colnames, header = TRUE) %>% 
+        tbl_df()
+  ValSim <- rename(ValSim, beta = beta.X_smartph_hrs)
+  # CI using SD of beta with scaling
+  sdScale_tmp <- ValSim %>% group_by(K, nRSloops, TrueBeta) %>% 
+          summarise(AvgBeta = mean(beta, na.rm = TRUE),  
+                    sdBeta = sd(beta, na.rm = TRUE)) %>%
+          mutate(CIlow =  AvgBeta - (qnorm(0.025, lower.tail = FALSE) * sdBeta * sqrt(K/n)),
+              CIup = AvgBeta + (qnorm(0.025, lower.tail = FALSE) * sdBeta * sqrt(K/n)),
+              type = 'scaledSD') %>% 
+          ungroup() %>% rowwise() %>% 
+          mutate(coverage_ind = ifelse(TrueBeta >= CIlow && TrueBeta <= CIup, 1, 0),
+              sim = i)
+  
+  # Collect the values over all simulations
+  scaledSD <- bind_rows(scaledSD,sdScale_tmp)
+}
+```
+
+
+```{r "plot-CI-model-3", echo = FALSE, fig.align = 'center', fig.width = 5, fig.height=6, cache.rebuild=TRUE}
+ToPlotCI <- scaledSD %>%  filter(K %in% c(230, 1000) & nRSloops %in% c(230, 1000)) %>% 
+  group_by(K, nRSloops) %>%
+  slice(seq(1, nsim, length.out = 100)) %>% ungroup()
+ToPlotCI$K <- factor(ToPlotCI$K, levels = c(230, 1000), labels = c('K = 230', 'K = 1000'))
+ToPlotCI$nRSloops <- factor(ToPlotCI$nRSloops, levels = c(230, 1000), labels = c('B = 230', 'B = 1000'))
+
+ggplot(ToPlotCI, aes(x = TrueBeta)) + geom_vline(aes(xintercept = TrueBeta), size = .8, alpha = .8) +
+   geom_point(aes(x = AvgBeta, y = sim, colour = factor(coverage_ind)), size = 0.5) + 
+   geom_segment(aes(x = CIlow, xend = CIup, y = sim, yend = sim, colour = factor(coverage_ind), alpha = factor(coverage_ind)), size = 0.9) + 
+  facet_wrap(K ~ nRSloops, dir = 'v') +
+  scale_alpha_manual("Contains true value", values = c(1,0.8), labels = c("NO", "YES")) +
+  scale_colour_manual("Contains true value", values = c('#d95f02', '#1b9e77'), labels = c("NO", "YES")) +
+   scale_x_continuous("beta") + scale_y_continuous("simulation") +
+  theme(legend.position="bottom") +
+   ggtitle("100 random selected simulations with the 95% CI")
+```
+
+```{r "table-scaled-sd-model-3", cache.rebuild = TRUE}
+scaledSDTable_tmp <- scaledSD %>% group_by(K,nRSloops) %>% summarise(EC = mean(coverage_ind))
+scaledSDTable <- matrix(scaledSDTable_tmp$EC, ncol = length(nRSloops_vec), byrow = TRUE)
+colnames(scaledSDTable) <- paste('B = ', nRSloops_vec, sep = '')
+rownames(scaledSDTable) <- paste('K = ', K_vec, sep = '')
+knitr::kable(scaledSDTable)
+```
+
