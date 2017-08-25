@@ -1,11 +1,11 @@
 #!/bin/sh
 #
 #
-#PBS -N LeverageS3
+#PBS -N LeverageS1
 #PBS -o output/output.file
 #PBS -e error/error.file
 #PBS -m a
-#PBS -l walltime=20:00:00
+#PBS -l walltime=11:00:00
 #PBS -l vmem=40GB
 #
 
@@ -23,7 +23,7 @@ cd $srcdir
 
 #----------------------------------------------------#
 # WHICH SCENARIO
-SCEN=3
+SCEN=1
 echo 'scenario ' $SCEN
 #----------------------------------------------------#
 

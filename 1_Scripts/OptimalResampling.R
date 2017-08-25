@@ -138,9 +138,11 @@ if(SCEN == 4){
 if(MACHINE == "HPC"){
 	# Vector of number of resampling loops
 	nRSloops_vec <- floor(seq(10,1000,length.out = 10))
+	nRSloops_vec <- nRSloops_vec[1:3]
 
 	# Vector of number of selected datapoints K per iteraton
 	K_vec <- floor(seq(10,1000,length.out = 10))
+	K_vec <- K_vec[1:3]
 
 	# Number of pairs/combinations between number of resampling loops and sampled data
 	pairs <- expand.grid(nRSloops = nRSloops_vec, K = K_vec)
@@ -215,14 +217,14 @@ if(MACHINE == "HPC"){
 		for(l in 1:nRSloops){
 			# Sample rows from original data with leverage scores as probability (i.e. weight = Weights)
 		  if(SCEN %in% c(1,2,4)){
-		    SelectedData <- dplyr::sample_n(OrigData, size = K, replace = FALSE, weight = Weights)
+		    SelectedData <- dplyr::sample_n(OrigData, size = K, replace = TRUE, weight = Weights)
 		  }
 		  if(SCEN == 3){
 			# While statement: check that at least both values of each control variable are sampled (otherwise matrix = singular)
-			SelectedData <- dplyr::sample_n(OrigData, size = K, replace = FALSE, weight = Weights)
+			SelectedData <- dplyr::sample_n(OrigData, size = K, replace = TRUE, weight = Weights)
         	CheckRange <- select(SelectedData, X_sex, X_econArea, X_ethnic)
         	while(sum(colSums(apply(CheckRange, 2, range))) != 3){
-          		SelectedData <- dplyr::sample_n(OrigData, size = K, replace = FALSE, weight = Weights)
+          		SelectedData <- dplyr::sample_n(OrigData, size = K, replace = TRUE, weight = Weights)
           	CheckRange <- select(SelectedData, X_sex, X_econArea, X_ethnic)
         	}
 		  }
