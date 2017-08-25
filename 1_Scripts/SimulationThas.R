@@ -551,26 +551,149 @@ scale_colour_manual(name = "", values = c('#6a51a3' = '#6a51a3', '#cc4c02' = '#c
 
 
 
+##
+##########
+### Fitting a weighted PIM
+##########
+##
 
+# Can we try to have a weighted PIM in the estimating equation?
+library(pim)
+library(nleqslv)
+library(dplyr)
 
-
-
-## TEST
-
-n <- 200
+# Step one: generate data
+set.seed(12)
+n <- 25
 u <- 1
 alpha <- 1
 sigma <- 1
-
-# Step one: generate data
 X <- runif(n = n, min = 0.1, max = u)
 Y <- alpha*X + rnorm(n = n, mean = 0, sd = sigma)
 TrueBeta <- alpha/(sqrt(2) * sigma)
 
-# We can first try using the PIM package
+# Now have weights
+weights <- hatvalues(lm(Y ~ X)); weights <- weights/sum(weights)
+
+# We can first try using the PIM package: unweighted
 PIMfit <- pim(formula = Y ~ X, data = data.frame(Y = Y, X = X), link = 'probit', model = 'difference')
 summary(PIMfit)
-PIMfit@coef
+#PIMfit$coefficients
 
-PIMlogit <- pim(formula = Y ~ X, data = data.frame(Y = Y, X = X), link = 'logit', model = 'difference')
+# Manually
+# Step one: create the set of pseudo-observations
+IndX <- X %>% data.frame('X' = ., 'Xweight' = weights) %>% mutate(index = 1:length(X))
+PseudoObs <- data.frame(expand.grid('Y' = Y,'Yprime' = Y),
+             expand.grid('IY' = 1:length(Y),'IYprime' = 1:length(Y))) %>%
+              rowwise() %>% mutate(X = IndX[which(IndX$index == IY),'X'],
+                       Xprime = IndX[which(IndX$index == IYprime),'X'],
+                       Xweight = IndX[which(IndX$index == IY),'Xweight'],
+                       XprimeWeight = IndX[which(IndX$index == IYprime),'Xweight']) %>%
+      filter(IY != IYprime) %>% select(-IY,-IYprime) %>%
+      mutate(PO = ifelse(Y < Yprime, 1,
+                     ifelse(Y == Yprime,0.5,0)))
+# Check sum of PO
+PseudoObs %>% select(PO) %>% colSums()
+
+# Filter only those observations I(Y <= Yprime)
+IndPseudObs <- PseudoObs %>% filter(PO > 0)
+
+# Calculate Z and weight of Z, based on mean
+IndPseudObs <- mutate(IndPseudObs, Z = Xprime - X, weightZ = (XprimeWeight + Xweight)/2)
+
+# Initial beta value for one predictor: one number
+beta <- matrix(0, ncol = 1, nrow = 1)
+# Z vector with length number of pseudo obs
+Z <- IndPseudObs %>% select(Z) %>% as.matrix(., ncol = 1)
+# Z times beta: matrix of [nPseudo x 1]
+Zbeta <- c(Z%*%beta) %>% as.matrix(., ncol = 1)
+# Pseudo observations
+PO <- IndPseudObs %>% select(PO)
+# Weights
+weightZ <- IndPseudObs %>% select(weightZ) %>% as.matrix(., ncol = 1)
+
+# Estimating equation
+colSums(Z*dnorm(Zbeta) * weightZ * (PO - pnorm(Zbeta) / c(pnorm(Zbeta)*(1-pnorm(Zbeta)))))
+
+# To solve, have estimating equation in function: first unweighted
+PIM.ScoreFunction <- function(Z, PO){
+  U.func <- function(beta, Z, PO){
+    Zbeta <- c(Z%*%beta)
+    colSums(Z*dnorm(Zbeta)*(PO - pnorm(Zbeta))/c(pnorm(Zbeta)*(1-pnorm(Zbeta))))
+  }
+  return(U.func)
+}
+
+# Now weighted
+PIM.ScoreFunctionWeighted <- function(Z, PO, weights){
+  U.func <- function(beta, Z, PO, weights){
+    Zbeta <- c(Z%*%beta)
+    colSums(Z*dnorm(Zbeta) * weights * (PO - pnorm(Zbeta))/c(pnorm(Zbeta)*(1-pnorm(Zbeta))))
+  }
+  return(U.func)
+}
+
+coef_unweig <- nleqslv(x = rep(0,ncol(Z)), PIM.ScoreFunction(Z = Z, PO = PO), Z=Z, PO=PO)$x
+coef_weig <- nleqslv(x = rep(0,ncol(Z)), PIM.ScoreFunctionWeighted(Z = Z, PO = PO, weights = weightZ), Z=Z, PO=PO, weights = weightZ)$x
+source('/Users/hanbossier/Dropbox/Mastat/Thesis/RCodePIM/1_Scripts/weighted_pim.R')
+coef_weig_pim <- pim(formula = Y ~ X, data = data.frame(Y = Y, X = X), 
+                     link = 'probit', model = 'difference', weights = weights)
+
+data.frame('PIM' = unlist(as.numeric(PIMfit@coef)), 'UnweightManual' = coef_unweig, 'WeightManual' = coef_weig, 'WeightInPim' = unlist(coef_weig_pim$coefficients))
+
+
+
+# How could we implement the weights into the pim package?
+
+create.poset <- function(compare=c('unique','all'),n){
+  ind <- seq_len(n)
+  unique <- match.arg(compare) == 'unique'
+  out <- vector("list",length=2)
+  names(out) <- c('L','R')
+  
+  if(unique){
+    out$L <- rep(ind, times=(ind-1L)[n:1L])
+    out$R <- unlist(lapply(ind[-1L],seq,n))
+  } else {
+    out$L <- rep(ind,each=n-1L)
+    out$R <- unlist(lapply(ind,function(i)ind[-i]))
+  }
+  return(out)
+}
+
+source_pim <- '/Users/hanbossier/Dropbox/Mastat/Thesis/RCodePIM/1_Scripts/source_pim/R'
+file.sources = list.files(source_pim, 
+                          pattern="*.R$", full.names=TRUE, 
+                          ignore.case=TRUE)
+sapply(file.sources,source,.GlobalEnv)
+pim(formula = Y ~ X, data = data.frame(Y = Y, X = X), link = 'probit', model = 'difference', weights = weights)
+
+
+data("FEVData")
+# Create the "model frame"
+FEVenv <- new.pim.env(FEVData, compare="unique")
+#' # This includes the poset
+pos <- poset(FEVenv, as.list=TRUE)
+#' 
+#' # create the formula and bind it to the pim.environment.
+FEVform <- new.pim.formula(
+   Age ~ I(L(Height) - R(Height))  ,
+   FEVenv
+ )
+
+FEVform <- new.pim.formula(
+  Age ~ I((L(Height) + R(Height)) / 2)  ,
+  FEVenv
+)
+
+#' 
+#' # Use this formula object to construct the model matrix
+#' # use the default model ( difference )
+MM <- model.matrix(FEVform)
+#' 
+#' # Use this formula object to construct the pseudo response
+Y <- response(FEVform)
+#' 
+#' # Now pim.fit can do what it does
+res <- pim.fit(MM,Y, estim = "estimator.glm", penv=FEVenv)
 
