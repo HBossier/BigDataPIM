@@ -1,0 +1,158 @@
+---
+title: "Bootstrap PIM"
+author: "Han Bossier"
+date: "13-8-2017"
+output:
+  html_document:
+    theme: journal
+    toc: yes
+  pdf_document:
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	comment = NA,
+	cache = TRUE,
+	warning = FALSE
+)
+```
+
+## Short Intro
+
+In this report, we try to perform a simple bootstrap on simulated data and construct percentile based 95% confidence intervals using PIM. We will like to look at the emperical coverage.
+
+## Model
+
+The model is based on a simple linear regression simulation set-up.
+
+#### Data generation
+
+```{r "model-1", echo = FALSE}
+u <- 1
+alpha <- 5
+sigma <- 1
+trueBeta <- alpha/(sqrt(2) * sigma)
+```
+
+We first generate data under the linear model:
+
+$$
+Y_i = \alpha X_i + \varepsilon_i 
+$$
+with $i = 1,...,n$ and $\varepsilon_i$ are i.i.d. $N({0,\sigma^2)}$ with $\sigma^2 = 1$. We consider a sample size $n = 250.000$. The predictor (*X*) is uniformly spaced between $[0.1,1]$. The value $\alpha$ is set to 5. Using the probit link function, the corresponding PIM can be expressed as:
+
+$$
+\Phi^{-1}[P(Y\preceq Y'|X,X')] = \beta(X' - X)
+$$
+where $\beta = \alpha/\sqrt{2\sigma^2}$. Hence the true value for $\beta$ equals ```r 5/(sqrt(2 * 1))```.
+
+
+
+## Simulation
+
+In the following code, we load in libraries, set the seed and fix some parameters.
+
+```{r "settings", cache.rebuild = TRUE}
+# Libraries
+library(pim)
+library(tidyverse)
+
+# Seed
+set.seed(12345)
+
+# Sample size
+n <- 100
+
+# Model
+alpha <- 5
+sigma <- 1
+trueBeta <- alpha/(sqrt(2) * sigma)
+
+# Number of bootstraps
+nBoots <- 999
+
+# Number of simulations
+nsim <- 100
+
+# Empty data frame containing all data
+ALL_bootData <- c()
+```
+
+Now we loop over 100 simulations in which we bootstrap for 999 times (**B = 999**). In each bootstrap, we generate a predictor and data according to the model described above. Then we fit a probabilistic index model and save the estiated $\beta$ parameter. 
+<br>
+After 999 bootstraps, we take the $0.025^{th}$ and $0.975^{th}$ percentile of these estimated $\beta$'s. These are then the lower and upper 95% CI bounds.
+<br>
+Finally, we check over all simulations whether the true value for $\beta$ is between the bootstrap CI bounds.
+
+```{r "bootstrap", cache = TRUE}
+# For loop over the simulations
+for(i in 1:nsim){
+  # The dataset
+  # Generate predictor
+  X <- runif(n = n, min = 0.1, max = u)
+  # Generate data
+  Y <- alpha*X + rnorm(n = n, mean = 0, sd = sigma)
+  # In data frame
+  OrigData <- data.frame(Y = Y, X = X)
+  # Bootstrap vector (within simulation)
+  sim_bootData <- c()
+  # For loop over the bootstraps
+  for(b in 1:nBoots){
+    # Sample from dataset
+    SelectData <- sample_n(OrigData, size = n, replace = TRUE)
+    
+    # Fit PIM
+    PIMfit <- pim(formula = Y ~ X, data = SelectData,
+                      link = 'probit', model = 'difference')
+    # Gather data
+    variance <- vcov(PIMfit)[1]
+    CIlow <- coef(PIMfit) - (qnorm(0.025, lower.tail = FALSE) * sqrt(variance))
+    CIup <- coef(PIMfit) + (qnorm(0.025, lower.tail = FALSE) * sqrt(variance))
+    bootData <- data.frame('beta' = coef(PIMfit), 'variance' = variance, 
+                           'CIlow' = CIlow, 'CIup' = CIup, 'boot' = b)
+    
+    # In rows
+    sim_bootData <- bind_rows(sim_bootData, bootData) %>% tbl_df()
+    
+    # Reset bootstrap
+    rm(bootData)
+  }
+  # Summarize over simulations
+  simData <- data.frame('AvgBeta' = summarise(sim_bootData, AvgBeta = mean(beta)),
+             'CIlow' = quantile(sim_bootData$beta, probs = c(0.025), names = FALSE),
+             'CIup' = quantile(sim_bootData$beta, probs = c(0.975), names = FALSE),
+             'sim' = i)
+  simData <- mutate(simData, ind_cov = ifelse(trueBeta >= CIlow & trueBeta <= CIup, 1 ,0))
+  
+  ALL_bootData <- bind_rows(ALL_bootData, simData)
+  
+  # Reset bootstrap vectors
+  rm(sim_bootData)
+}
+```
+
+
+## Results
+
+First we plot all the CI's with the true value for $\beta$ being the vertical line
+
+```{r "plot", fig.align='center', fig.width=8, cache.rebuild=TRUE}
+ALL_bootData %>%
+  ggplot(., aes(x = trueBeta)) + geom_vline(xintercept = trueBeta) +
+  geom_point(aes(x = AvgBeta, y = sim)) + 
+  geom_segment(aes(x = CIlow, xend = CIup, y = sim, yend = sim)) + 
+  scale_x_continuous("beta") + scale_y_continuous("simulation") +
+  ggtitle("95% CI around bootstrap beta PIM estimate")
+```
+
+Then, we calculate the emperical coverage.
+
+```{r "coverage", cache.rebuild = TRUE}
+summarise(ALL_bootData, EC = mean(ind_cov, na.rm = TRUE))
+```
+
+
+
