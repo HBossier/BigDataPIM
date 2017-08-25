@@ -1,0 +1,585 @@
+---
+title: "Analysis: single data partitioning"
+author: "Han Bossier"
+date: "11-8-2017"
+output:
+  html_document:
+    theme: journal
+    toc: yes
+  pdf_document:
+    toc: yes
+---
+
+```{r "setup", include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	comment = NA,
+	cache = TRUE,
+	warning = FALSE
+)
+
+# libraries
+library(ggplot2)
+library(dplyr)
+library(ggthemes)
+library(RColorBrewer)
+library(boot)
+library(parallel)
+
+# Custom QQ plot function
+gg_qq <- function(x, distribution = "norm", ..., line.estimate = NULL, conf = 0.95,
+                  labels = names(x), title = NULL){
+  q.function <- eval(parse(text = paste0("q", distribution)))
+  d.function <- eval(parse(text = paste0("d", distribution)))
+  x <- na.omit(x)
+  ord <- order(x)
+  n <- length(x)
+  P <- ppoints(length(x))
+  df <- data.frame(ord.x = x[ord], z = q.function(P, ...))
+
+  if(is.null(line.estimate)){
+    Q.x <- quantile(df$ord.x, c(0.25, 0.75))
+    Q.z <- q.function(c(0.25, 0.75), ...)
+    b <- diff(Q.x)/diff(Q.z)
+    coef <- c(Q.x[1] - b * Q.z[1], b)
+  } else {
+    coef <- coef(line.estimate(ord.x ~ z))
+  }
+
+  zz <- qnorm(1 - (1 - conf)/2)
+  SE <- (coef[2]/d.function(df$z)) * sqrt(P * (1 - P)/n)
+  fit.value <- coef[1] + coef[2] * df$z
+  df$upper <- fit.value + zz * SE
+  df$lower <- fit.value - zz * SE
+
+  if(!is.null(labels)){ 
+    df$label <- ifelse(df$ord.x > df$upper | df$ord.x < df$lower, labels[ord],"")
+    }
+
+  p <- ggplot(df, aes(x=z, y=ord.x)) +
+    geom_point() + 
+    geom_abline(intercept = coef[1], slope = coef[2]) +
+    geom_ribbon(aes(ymin = lower, ymax = upper), alpha=0.2) + 
+    scale_x_continuous(name = 'Normal Quantiles') + 
+    scale_y_continuous(name = 'Sample Quantiles') +
+      ggtitle("QQ-plot", subtitle = title)
+  if(!is.null(labels)) p <- p + geom_text( aes(label = label))
+  return(p)
+}
+
+
+# Get info on machine we are compiling
+OS <- Sys.info()['machine']
+if(OS == 'x86_64'){
+  MACHINE <- "MAC"
+  wd <- '/Users/hanbossier/Dropbox/Mastat/Thesis/BigDataPIM'
+}else{
+  MACHINE <- "DOS"
+  wd <- 'D:/Users/Han/Dropbox/Mastat/Thesis/BigDataPIM'
+}
+
+# location of data
+if(MACHINE == "MAC"){
+datLoc <- "/Volumes/1_5_TB_Han_HDD/Mastat/Thesis/BigDataPIM/BLB/Results/"  
+}
+if(MACHINE == "DOS"){
+datLoc <- ""  
+}
+```
+
+## Introduction
+
+We have run 1000 times the single data partitioning algorithm. In this report, we look at 
+
+* how to combine the results
+* the performance of the PIM estimators (both $\widehat\beta$ and the variance)
+
+## Single data partitioning
+
+<br>
+
+> Description of method might come here
+
+<br>
+
+## Models
+
+Below, we describe the models used in generating the data. These are the same models used in the uniform resampling technique. Moreover, we use the same seed, hence both the uniform subsampling algorithm and this algorithm are based on the **same dataset**! This makes comparisson between both methods possible. 
+
+### Model 1
+
+#### Data generation
+```{r "generate-model-1", echo = FALSE}
+u <- 1
+alpha <- 5
+sigma <- 1
+trueBeta <- alpha/(sqrt(2) * sigma)
+```
+
+We first generate data under the linear model:
+
+$$
+Y_i = \alpha X_i + \varepsilon_i 
+$$
+with $i = 1,...,n$ and $\varepsilon_i$ are i.i.d. $N({0,\sigma^2)}$ with $\sigma^2 = 1$. We consider a sample size $n = 250.000$. The predictor (*X*) is uniformly spaced between $[0.1,1]$. The value $\alpha$ is set to 5. Using the probit link function, the corresponding PIM can be expressed as:
+
+$$
+\Phi^{-1}[P(Y\preceq Y'|X,X')] = \beta(X' - X)
+$$
+where $\beta = \alpha/\sqrt{2\sigma^2}$. Hence the true value for $\beta$ equals ```r 5/(sqrt(2 * 1))```.
+
+### Model 2
+For the second model, we choose $\alpha = 1$, a predictor (*X*) uniformly spaced between $[0.1,10]$ and $\sigma^2 = 25$. Hence, the true value for $\beta =$ ```r 1/(sqrt(2 * 25))```.
+Note, this is model 4 in the uniform subsampling report. 
+
+### Model 3
+
+#### Data generation
+
+The second model is a multiple regression model in which we take parameters from the analysis done in Przybylski and Weinstein (2017). In their study, the authors used linear regression to model the effect of (among other variables) smartphone usage in the weekdays and weekends on self-reported mental well being. To control for confounding effects, they included variables for sex, whether the participant was located in economic deprived areas and the ethnic background (minority group yes/no) in the model. The full model is given as:
+
+$$
+Y_i = \mu + \alpha_1 X_i + \gamma_1 Z_{1i} + \gamma_2 Z_{2i} + \gamma_3 Z_{31i} + \varepsilon_i 
+$$
+
+Based on a linear regression, we find the regression parameters, the proportions of the covariates ($Z_j$), the range of the predictor ($X$, smartphone usage during weekdays measured on a Likert scale from 0-7) and the spread of the observations ($\sigma = 9.51$). These parameters are then used to generate normally i.i.d. data. 
+
+## Simulations and results
+
+Some parameters:
+
+* 1000 simulations
+* With n = 250.000, we split dataset in 100 random parts (bags) --> sample size per bag = ```r 250000/100```
+* 1 bootstrap per bag
+
+```{r "simulation-parameters"}
+# Number of simulations
+nsim <- 1000
+# Number of bags
+Sbags <- 1:100
+cores <- max(Sbags)
+# Total sample size
+n <- 250000
+# Re-sample size of the bags
+sizeB <- n / cores
+```
+
+
+### Model 1
+
+```{r "model-1-parameters", cache.rebuild = TRUE}
+u <- 1
+alpha <- 5
+sigma <- 1
+trueBeta <- alpha/(sqrt(2) * sigma)
+# Model (called SCEN in script)
+SCEN <- 1
+```
+
+
+```{r "calculate-values-model-1", results = 'hide', cache = TRUE}
+valuesAllSim <- data.frame() %>% tbl_df()
+# Progress
+progress <- floor(seq(1,nsim,length.out = 11)[-1])
+# load in estimated beta values
+for(i in 1:nsim){
+  if(i %in% progress) print(paste0("At ", i/nsim*100, "%"))
+  # Values in one simulation: 
+  ValSimBag <- c()
+  for(S in Sbags){
+    ValSimBag_tmp <-  try(
+      read.table(file=paste0(datLoc,
+                'SCEN_',SCEN,'/',i,'/BLB_beta_SCEN_',SCEN,'_simID_',i,'_bagID_', S, '.txt'),
+                 col.names = c("beta", "sVariance", "Bag", "Sim", "TrueBeta"), 
+                 header = TRUE) %>% tbl_df(), silent = TRUE)
+    if(class(ValSimBag_tmp)[1] == "try-error"){
+      print(i);next
+    }
+    ValSimBag <- bind_rows(ValSimBag, ValSimBag_tmp)
+  }
+  # Now try a couple of things
+    # 1: mean over the bags of the sandwich variance
+    SanVar_tmp <- ValSimBag %>% group_by(Sim) %>% 
+        summarise(AvgBeta = mean(beta, na.rm =TRUE), AvgSvar = mean(sVariance, na.rm = TRUE)) %>%
+        mutate(CIlow = AvgBeta - (qnorm(0.025, lower.tail = FALSE) * sqrt(AvgSvar)),
+               CIup = AvgBeta + (qnorm(0.025, lower.tail = FALSE) * sqrt(AvgSvar)),
+               type = 'SanVar')
+    # 2: percentile based CI
+    perc_tmp <- ValSimBag %>% group_by(Sim) %>% 
+        summarise(AvgBeta = mean(beta, na.rm =TRUE), 
+                  CIlow = quantile(beta, probs = c(0.025), na.rm = TRUE),
+                  CIup = quantile(beta, probs = c(0.975), na.rm = TRUE)) %>%
+        mutate(type = 'Perc')
+    # 3: sd based CI
+    sdBeta_tmp <- ValSimBag %>% group_by(Sim) %>% 
+        summarise(AvgBeta = mean(beta, na.rm =TRUE), sdBeta = sd(beta, na.rm = TRUE)) %>%
+        mutate(CIlow =  AvgBeta - (qnorm(0.025, lower.tail = FALSE) * sdBeta),
+              CIup = AvgBeta + (qnorm(0.025, lower.tail = FALSE) * sdBeta),
+              type = 'SDbeta')
+    # 4: sd, scaled with sqrt(sizeB/n)
+    sdBetaScaled_tmp <- ValSimBag %>% group_by(Sim) %>% 
+        summarise(AvgBeta = mean(beta, na.rm =TRUE), sdBeta = sd(beta, na.rm = TRUE)) %>%
+        mutate(CIlow =  AvgBeta - (qnorm(0.025, lower.tail = FALSE) * sdBeta * sqrt(sizeB/n)),
+              CIup = AvgBeta + (qnorm(0.025, lower.tail = FALSE) * sdBeta * sqrt(sizeB/n)),
+              SE = sdBeta * sqrt(sizeB/n),
+              type = 'ScaledSDbeta')
+    # 5: summing sandwich variance and dividing by S^2, with S the number of bags
+    sdSumSvar_tmp <- ValSimBag %>% group_by(Sim) %>% 
+          summarise(AvgBeta = mean(beta, na.rm = TRUE),  
+                    SummedSvar = sum(sVariance, na.rm = TRUE)) %>%
+          mutate(bVar = SummedSvar * (1/cores^2),
+              SE = sqrt(bVar),
+              CIlow =  AvgBeta - (qnorm(0.025, lower.tail = FALSE) * sqrt(bVar)),
+              CIup = AvgBeta + (qnorm(0.025, lower.tail = FALSE) * sqrt(bVar)),
+              type = 'avSVar')
+    
+    # Now bind them in rows
+    ValSim <- bind_rows(select(SanVar_tmp, -AvgSvar) %>% mutate(SE = NA),
+                perc_tmp  %>% mutate(SE = NA),
+                select(sdBeta_tmp, - sdBeta) %>% mutate(SE = NA),
+                select(sdBetaScaled_tmp, - sdBeta),
+                select(sdSumSvar_tmp, -SummedSvar, -bVar)) %>%
+              mutate(TrueBeta = trueBeta,
+                EC = ifelse(TrueBeta >= CIlow & TrueBeta <= CIup, 1, 0))
+
+  # Add to data frame with all simulations
+  valuesAllSim <- bind_rows(valuesAllSim, ValSim)
+  
+  # Reset objects
+  rm(ValSim, SanVar_tmp, perc_tmp, sdBeta_tmp, sdBetaScaled_tmp, sdSumSvar_tmp, ValSimBag)
+}
+```
+
+
+#### Bias
+
+```{r "plot-bias-model-1", echo = FALSE, fig.align='center', fig.width=6}
+# average beta is calculated, take just the values of avSVar
+valuesAllSim %>% filter(type == 'avSVar') %>%
+  ggplot(., aes(x = AvgBeta)) + geom_histogram(bins = 30) +
+    geom_vline(data = mutate(.data = valuesAllSim, TrueValue = TrueBeta, Label = "True Value of Beta"),
+    aes(xintercept = TrueValue, linetype = Label), size = 0.7, show.legend = TRUE)
+
+valuesAllSim %>% filter(type == 'avSVar') %>%
+  ggplot(., aes(x = AvgBeta)) + geom_density(fill = 'purple') +
+    geom_vline(data = mutate(.data = valuesAllSim, TrueValue = TrueBeta, Label = "True Value of Beta"),
+    aes(xintercept = TrueValue, linetype = Label), size = 0.7, show.legend = TRUE)
+```
+
+
+#### Normal approximation
+
+```{r "plot-QQ-model-1", echo = FALSE, fig.align='center', fig.width=6}
+valuesAllSim %>% filter(type == 'avSVar') %>% 
+    select(AvgBeta) %>% unlist(.) %>% 
+    as.numeric() %>% gg_qq(x = ., title = paste0('Model 1')) 
+```
+
+
+#### Confidence Intervals
+
+
+```{r "plot-CI-model-1", fig.align = 'center', fig.width = 5, fig.height=6}
+valuesAllSim$type <- factor(valuesAllSim$type, levels = c('SanVar', 'Perc', 'SDbeta', 'ScaledSDbeta', 'avSVar'), labels = c('Average Sandwich Estimator', 'Percentile', 'sd(beta)', 'sd(beta) * sqrt(sizeB/n)', '1/S^2 * sum(Var(beta))'))
+
+valuesAllSim %>%  group_by(type) %>% slice(seq(5, nsim, length.out = 100)) %>%
+   ggplot(., aes(x = TrueBeta)) + geom_vline(aes(xintercept = TrueBeta), size = .8, alpha = .8) +
+   geom_point(aes(x = AvgBeta, y = Sim, colour = factor(EC)), size = 0.5) + 
+   geom_segment(aes(x = CIlow, xend = CIup, y = Sim, yend = Sim, colour = factor(EC), alpha = factor(EC)), size = 0.9) + 
+   facet_wrap( ~ type, scales = 'free_x') +
+  scale_alpha_manual("Contains true value", values = c(1,0.8), labels = c("NO", "YES")) +
+  scale_colour_manual("Contains true value", values = c('#d95f02', '#1b9e77'), labels = c("NO", "YES")) +
+   scale_x_continuous("beta") + scale_y_continuous("simulation") +
+  theme(legend.position="bottom") +
+   ggtitle("100 random selected simulations with the 95% CI")
+```
+
+```{r "EC-coverage-model-1"}
+valuesAllSim %>% group_by(type) %>% summarise(EC = mean(EC))
+```
+
+### Model 2
+
+Parameters:
+
+```{r "model-2-parameters", cache.rebuild = TRUE}
+u <- 10
+alpha <- 1
+sigma <- 5
+trueBeta <- alpha/(sqrt(2) * sigma)
+# Model (called SCEN in script)
+SCEN <- 4
+```
+
+
+```{r "calculate-values-model-2", results = 'hide', cache = TRUE}
+valuesAllSim <- data.frame() %>% tbl_df()
+# Progress
+progress <- floor(seq(1,nsim,length.out = 11)[-1])
+# load in estimated beta values
+for(i in 1:nsim){
+  if(i %in% progress) print(paste0("At ", i/nsim*100, "%"))
+  # Values in one simulation: 
+  ValSimBag <- c()
+  for(S in Sbags){
+    ValSimBag_tmp <-  try(
+      read.table(file=paste0(datLoc,
+                'SCEN_',SCEN,'/',i,'/BLB_beta_SCEN_',SCEN,'_simID_',i,'_bagID_', S, '.txt'),
+                 col.names = c("beta", "sVariance", "Bag", "Sim", "TrueBeta"), 
+                 header = TRUE) %>% tbl_df(), silent = TRUE)
+    if(class(ValSimBag_tmp)[1] == "try-error"){
+      print(i);next
+    }
+    ValSimBag <- bind_rows(ValSimBag, ValSimBag_tmp)
+  }
+  # Now try a couple of things
+    # 1: mean over the bags of the sandwich variance
+    SanVar_tmp <- ValSimBag %>% group_by(Sim) %>% 
+        summarise(AvgBeta = mean(beta, na.rm =TRUE), AvgSvar = mean(sVariance, na.rm = TRUE)) %>%
+        mutate(CIlow = AvgBeta - (qnorm(0.025, lower.tail = FALSE) * sqrt(AvgSvar)),
+               CIup = AvgBeta + (qnorm(0.025, lower.tail = FALSE) * sqrt(AvgSvar)),
+               type = 'SanVar')
+    # 2: percentile based CI
+    perc_tmp <- ValSimBag %>% group_by(Sim) %>% 
+        summarise(AvgBeta = mean(beta, na.rm =TRUE), 
+                  CIlow = quantile(beta, probs = c(0.025), na.rm = TRUE),
+                  CIup = quantile(beta, probs = c(0.975), na.rm = TRUE)) %>%
+        mutate(type = 'Perc')
+    # 3: sd based CI
+    sdBeta_tmp <- ValSimBag %>% group_by(Sim) %>% 
+        summarise(AvgBeta = mean(beta, na.rm =TRUE), sdBeta = sd(beta, na.rm = TRUE)) %>%
+        mutate(CIlow =  AvgBeta - (qnorm(0.025, lower.tail = FALSE) * sdBeta),
+              CIup = AvgBeta + (qnorm(0.025, lower.tail = FALSE) * sdBeta),
+              type = 'SDbeta')
+    # 4: sd, scaled with sqrt(sizeB/n)
+    sdBetaScaled_tmp <- ValSimBag %>% group_by(Sim) %>% 
+        summarise(AvgBeta = mean(beta, na.rm =TRUE), sdBeta = sd(beta, na.rm = TRUE)) %>%
+        mutate(CIlow =  AvgBeta - (qnorm(0.025, lower.tail = FALSE) * sdBeta * sqrt(sizeB/n)),
+              CIup = AvgBeta + (qnorm(0.025, lower.tail = FALSE) * sdBeta * sqrt(sizeB/n)),
+              SE = sdBeta * sqrt(sizeB/n),
+              type = 'ScaledSDbeta')
+    # 5: summing sandwich variance and dividing by S^2, with S the number of bags
+    sdSumSvar_tmp <- ValSimBag %>% group_by(Sim) %>% 
+          summarise(AvgBeta = mean(beta, na.rm = TRUE),  
+                    SummedSvar = sum(sVariance, na.rm = TRUE)) %>%
+          mutate(bVar = SummedSvar * (1/cores^2),
+              SE = sqrt(bVar),
+              CIlow =  AvgBeta - (qnorm(0.025, lower.tail = FALSE) * sqrt(bVar)),
+              CIup = AvgBeta + (qnorm(0.025, lower.tail = FALSE) * sqrt(bVar)),
+              type = 'avSVar')
+    
+    # Now bind them in rows
+    ValSim <- bind_rows(select(SanVar_tmp, -AvgSvar) %>% mutate(SE = NA),
+                perc_tmp  %>% mutate(SE = NA),
+                select(sdBeta_tmp, - sdBeta) %>% mutate(SE = NA),
+                select(sdBetaScaled_tmp, - sdBeta),
+                select(sdSumSvar_tmp, -SummedSvar, -bVar)) %>%
+              mutate(TrueBeta = trueBeta,
+                EC = ifelse(TrueBeta >= CIlow & TrueBeta <= CIup, 1, 0))
+  
+  # Add to data frame with all simulations
+  valuesAllSim <- bind_rows(valuesAllSim, ValSim)
+  
+  # Reset objects
+  rm(ValSim, SanVar_tmp, perc_tmp, sdBeta_tmp, sdBetaScaled_tmp, sdSumSvar_tmp, ValSimBag)
+}
+```
+
+#### Bias
+
+```{r "plot-bias-model-2", echo = FALSE, fig.align='center', fig.width=6}
+# average beta is calculated, take just the values of avSVar
+valuesAllSim %>% filter(type == 'avSVar') %>%
+  ggplot(., aes(x = AvgBeta)) + geom_histogram(bins = 30) +
+    geom_vline(data = mutate(.data = valuesAllSim, TrueValue = TrueBeta, Label = "True Value of Beta"),
+    aes(xintercept = TrueValue, linetype = Label), size = 0.7, show.legend = TRUE)
+
+valuesAllSim %>% filter(type == 'avSVar') %>%
+  ggplot(., aes(x = AvgBeta)) + geom_density(fill = 'purple') +
+    geom_vline(data = mutate(.data = valuesAllSim, TrueValue = TrueBeta, Label = "True Value of Beta"),
+    aes(xintercept = TrueValue, linetype = Label), size = 0.7, show.legend = TRUE)
+```
+
+
+#### Normal approximation
+
+```{r "plot-QQ-model-2", echo = FALSE, fig.align='center', fig.width=6}
+valuesAllSim %>% filter(type == 'avSVar') %>% 
+    select(AvgBeta) %>% unlist(.) %>% 
+    as.numeric() %>% gg_qq(x = ., title = paste0('Model 1')) 
+```
+
+
+#### Confidence Intervals
+
+
+```{r "plot-CI-model-2", fig.align = 'center', fig.width = 5, fig.height=6}
+valuesAllSim$type <- factor(valuesAllSim$type, levels = c('SanVar', 'Perc', 'SDbeta', 'ScaledSDbeta', 'avSVar'), labels = c('Average Sandwich Estimator', 'Percentile', 'sd(beta)', 'sd(beta) * sqrt(sizeB/n)', '1/S^2 * sum(Var(beta))'))
+
+valuesAllSim %>%  group_by(type) %>% slice(seq(5, nsim, length.out = 100)) %>%
+   ggplot(., aes(x = TrueBeta)) + geom_vline(aes(xintercept = TrueBeta), size = .8, alpha = .8) +
+   geom_point(aes(x = AvgBeta, y = Sim, colour = factor(EC)), size = 0.5) + 
+   geom_segment(aes(x = CIlow, xend = CIup, y = Sim, yend = Sim, colour = factor(EC), alpha = factor(EC)), size = 0.9) + 
+   facet_wrap( ~ type, scales = 'free_x') +
+  scale_alpha_manual("Contains true value", values = c(1,0.8), labels = c("NO", "YES")) +
+  scale_colour_manual("Contains true value", values = c('#d95f02', '#1b9e77'), labels = c("NO", "YES")) +
+   scale_x_continuous("beta") + scale_y_continuous("simulation") +
+  theme(legend.position="bottom") +
+   ggtitle("100 random selected simulations with the 95% CI")
+```
+
+```{r "EC-coverage-model-2"}
+valuesAllSim %>% group_by(type) %>% summarise(EC = mean(EC))
+```
+
+
+### Model 3
+
+```{r "model-3-parameters", cache.rebuild = TRUE}
+alpha_1 <- -0.43
+# Sigma based on dataset
+sigma <- 9.51
+trueBeta <- alpha_1/(sqrt(2) * sigma)
+# Model (called SCEN in script)
+SCEN <- 3
+```
+
+
+```{r "calculate-values-model-3", results = 'hide', cache = TRUE}
+# Names in data files
+S3_colnames <- c("beta.X_smartph_hrs", "beta.X_sex",
+                 "beta.X_econArea", "beta.X_ethnic",
+                 "sVariance.X_smartph_hrs", "sVariance.X_sex",
+                 "sVariance.X_econArea", "sVariance.X_ethnic",
+                 "Bag", "Sim", "TrueBeta")
+# Vector with the values over all simulations
+valuesAllSim <- data.frame() %>% tbl_df()
+# Progress
+progress <- floor(seq(1,nsim,length.out = 11)[-1])
+
+# load in estimated beta values
+for(i in 1:nsim){
+  if(i %in% progress) print(paste0("At ", i/nsim*100, "%"))
+  # Values in one simulation: 
+  ValSimBag <- c()
+  for(S in Sbags){
+    ValSimBag_tmp <-  try(read.table(file = paste0(datLoc, 'SCEN_', SCEN,'/', i, '/BLB_beta_SCEN_',SCEN,'_simID_',i,'_bagID_', S, '.txt'),
+                 col.names = S3_colnames, 
+                 header = TRUE) %>% tbl_df() %>% 
+                  rename(beta = beta.X_smartph_hrs, sVariance = sVariance.X_smartph_hrs), 
+                  silent = TRUE)
+    if(class(ValSimBag_tmp)[1] == "try-error"){
+      print(i);next
+    }
+    ValSimBag <- bind_rows(ValSimBag, ValSimBag_tmp)
+  }
+  # Now try a couple of things
+    # 1: mean over the bags of the sandwich variance
+    SanVar_tmp <- ValSimBag %>% group_by(Sim) %>% 
+        summarise(AvgBeta = mean(beta, na.rm =TRUE), AvgSvar = mean(sVariance, na.rm = TRUE)) %>%
+        mutate(CIlow = AvgBeta - (qnorm(0.025, lower.tail = FALSE) * sqrt(AvgSvar)),
+               CIup = AvgBeta + (qnorm(0.025, lower.tail = FALSE) * sqrt(AvgSvar)),
+               type = 'SanVar')
+    # 2: percentile based CI
+    perc_tmp <- ValSimBag %>% group_by(Sim) %>% 
+        summarise(AvgBeta = mean(beta, na.rm =TRUE), 
+                  CIlow = quantile(beta, probs = c(0.025), na.rm = TRUE),
+                  CIup = quantile(beta, probs = c(0.975), na.rm = TRUE)) %>%
+        mutate(type = 'Perc')
+    # 3: sd based CI
+    sdBeta_tmp <- ValSimBag %>% group_by(Sim) %>% 
+        summarise(AvgBeta = mean(beta, na.rm =TRUE), sdBeta = sd(beta, na.rm = TRUE)) %>%
+        mutate(CIlow =  AvgBeta - (qnorm(0.025, lower.tail = FALSE) * sdBeta),
+              CIup = AvgBeta + (qnorm(0.025, lower.tail = FALSE) * sdBeta),
+              type = 'SDbeta')
+    # 4: sd, scaled with sqrt(sizeB/n)
+    sdBetaScaled_tmp <- ValSimBag %>% group_by(Sim) %>% 
+        summarise(AvgBeta = mean(beta, na.rm =TRUE), sdBeta = sd(beta, na.rm = TRUE)) %>%
+        mutate(CIlow =  AvgBeta - (qnorm(0.025, lower.tail = FALSE) * sdBeta * sqrt(sizeB/n)),
+              CIup = AvgBeta + (qnorm(0.025, lower.tail = FALSE) * sdBeta * sqrt(sizeB/n)),
+              SE = sdBeta * sqrt(sizeB/n),
+              type = 'ScaledSDbeta')
+    # 5: summing sandwich variance and dividing by S^2, with S the number of bags
+    sdSumSvar_tmp <- ValSimBag %>% group_by(Sim) %>% 
+          summarise(AvgBeta = mean(beta, na.rm = TRUE),  
+                    SummedSvar = sum(sVariance, na.rm = TRUE)) %>%
+          mutate(bVar = SummedSvar * (1/cores^2),
+              SE = sqrt(bVar),
+              CIlow =  AvgBeta - (qnorm(0.025, lower.tail = FALSE) * sqrt(bVar)),
+              CIup = AvgBeta + (qnorm(0.025, lower.tail = FALSE) * sqrt(bVar)),
+              type = 'avSVar')
+    
+    # Now bind them in rows
+    ValSim <- bind_rows(select(SanVar_tmp, -AvgSvar) %>% mutate(SE = NA),
+                perc_tmp  %>% mutate(SE = NA),
+                select(sdBeta_tmp, - sdBeta) %>% mutate(SE = NA),
+                select(sdBetaScaled_tmp, - sdBeta),
+                select(sdSumSvar_tmp, -SummedSvar, -bVar)) %>%
+              mutate(TrueBeta = trueBeta,
+                EC = ifelse(TrueBeta >= CIlow & TrueBeta <= CIup, 1, 0))
+  
+  # Add to data frame with all simulations
+  valuesAllSim <- bind_rows(valuesAllSim, ValSim)
+  
+  # Reset objects
+  rm(ValSim, SanVar_tmp, perc_tmp, sdBeta_tmp, sdBetaScaled_tmp, ValSimBag)
+}
+```
+
+#### Bias
+
+```{r "plot-bias-model-3", echo = FALSE, fig.align='center', fig.width=6}
+# average beta is calculated, take just the values of avSVar
+valuesAllSim %>% filter(type == 'avSVar') %>%
+  ggplot(., aes(x = AvgBeta)) + geom_histogram(bins = 30) +
+    geom_vline(data = mutate(.data = valuesAllSim, TrueValue = TrueBeta, Label = "True Value of Beta"),
+    aes(xintercept = TrueValue, linetype = Label), size = 0.7, show.legend = TRUE)
+
+valuesAllSim %>% filter(type == 'avSVar') %>%
+  ggplot(., aes(x = AvgBeta)) + geom_density(fill = 'purple') +
+    geom_vline(data = mutate(.data = valuesAllSim, TrueValue = TrueBeta, Label = "True Value of Beta"),
+    aes(xintercept = TrueValue, linetype = Label), size = 0.7, show.legend = TRUE)
+```
+
+
+#### Normal approximation
+
+```{r "plot-QQ-model-3", echo = FALSE, fig.align='center', fig.width=6}
+valuesAllSim %>% filter(type == 'avSVar') %>% 
+    select(AvgBeta) %>% unlist(.) %>% 
+    as.numeric() %>% gg_qq(x = ., title = paste0('Model 3')) 
+```
+
+#### Confidence Intervals
+
+```{r "plot-CI-model-3", echo = FALSE, fig.align = 'center', fig.width = 5, fig.height=6}
+valuesAllSim$type <- factor(valuesAllSim$type, levels = c('SanVar', 'Perc', 'SDbeta', 'ScaledSDbeta', 'avSVar'), labels = c('Average Sandwich Estimator', 'Percentile', 'sd(beta)', 'sd(beta) * sqrt(sizeB/n)', '1/S^2 * sum(Var(beta))'))
+
+valuesAllSim %>%  group_by(type) %>% slice(seq(1, nsim, length.out = 100)) %>%
+   ggplot(., aes(x = TrueBeta)) + geom_vline(aes(xintercept = TrueBeta), size = .8, alpha = .8) +
+   geom_point(aes(x = AvgBeta, y = Sim, colour = factor(EC)), size = 0.5) + 
+   geom_segment(aes(x = CIlow, xend = CIup, y = Sim, yend = Sim, colour = factor(EC), alpha = factor(EC)), size = 0.9) + 
+   facet_wrap( ~ type, scales = 'free_x') +
+  scale_alpha_manual("Contains true value", values = c(1,0.8), labels = c("NO", "YES")) +
+  scale_colour_manual("Contains true value", values = c('#d95f02', '#1b9e77'), labels = c("NO", "YES")) +
+   scale_x_continuous("beta") + scale_y_continuous("simulation") +
+  theme(legend.position="bottom") +
+   ggtitle("100 random selected simulations with the 95% CI")
+```
+
+```{r "EC-coverage-model-3"}
+valuesAllSim %>% group_by(type) %>% summarise(EC = mean(EC))
+```
+
+
+
+<br>
+<br>
+<br>
+<br>
+
+
+
+
+
