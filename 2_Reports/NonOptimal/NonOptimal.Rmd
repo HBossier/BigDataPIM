@@ -280,6 +280,11 @@ par(mfrow = c(1,1))
 
 > Note that we did not introduce the observed skeweness in the real dataset. 
 
+
+### Model 4
+For the fourth model, we choose $\alpha = 1$, a predictor (*X*) uniformly spaced between $[0.1,10]$ and $\sigma^2 = 25$. Hence, the true value for $\beta =$ ```r 1/(sqrt(2 * 25))```.
+
+
 ### Simulation parameters
 We vary the amount of iterations **B** as well as the number of selected samples **K** in each iteration to find the optimal balance in bias and computation time. Both **B** and **K** range from 10 to 1000. We consider 10 levels between these points for each parameter. Hence we have $10 \times 10 = 100$ scenarios. 
 
@@ -338,8 +343,9 @@ for(i in 1:nsim){
   if(i %in% progress) print(paste0("At ", i/nsim*100, "%"))
   # Values in one simulation: estimated beta values averaged within the sampling algorithm
   ValSim <-  try(read.table(file = paste0(datLoc, 'uni_beta_vector_simID_', i, '_SCEN_', SCEN, '.txt'),
-               col.names = c("beta", "sVariance", "K", "nRSloops", "TrueBeta"), header = TRUE) %>% tbl_df() %>%
-      group_by(K, nRSloops) %>% summarise(avBeta = mean(beta)) %>% 
+               col.names = c("beta", "sVariance", "K", "nRSloops", "TrueBeta"), 
+               header = TRUE) %>% tbl_df() %>%
+      group_by(K, nRSloops, TrueBeta) %>% summarise(avBeta = mean(beta)) %>% 
       mutate(sim = i), silent = TRUE)
   if(class(ValSim) == "try-error"){
     print(i);next
@@ -400,13 +406,23 @@ ggplot(valuesAllSim, aes(x = K, y = avBeta)) +
   scale_x_continuous(name = "Number of samples (K) in one iteration",
                      breaks = seq(min(pairs$K), max(pairs$K),length.out = 4)) +
   scale_y_continuous(name = expression(hat(beta))) +
-  geom_line(data = mutate(.data = valuesAllSim, TrueValue = trueBeta, Label = "True Value of Beta"),
+  geom_line(data = mutate(.data = valuesAllSim, TrueValue = TrueBeta, Label = "True Value of Beta"),
              aes(y = TrueValue, linetype = Label), size = 0.7, show.legend = TRUE) +
   scale_linetype_discrete(name = "") +
   ggtitle("Estimated beta parameter given the number of iterations (B)") +
   theme_minimal() +
   theme(axis.text.x=element_text(angle = -75, hjust = 0),
         legend.position = "bottom")
+```
+
+```{r "calculate-MSE-model-1"}
+MSEtable_tmp <- group_by(valuesAllSim, K, nRSloops) %>% mutate(SE = (avBeta - TrueBeta)^2) %>%
+  summarise(MSE = mean(SE, na.rm = TRUE))
+MSEtable <- matrix(MSEtable_tmp$MSE, ncol = length(nRSloops_vec), byrow = TRUE)
+colnames(MSEtable) <- paste('B = ', nRSloops_vec, sep = '')
+rownames(MSEtable) <- paste('K = ', K_vec, sep = '')
+options( scipen = 6 )
+knitr::kable(MSEtable)
 ```
 
 Plotting the computational time.
@@ -1115,6 +1131,124 @@ rownames(scaledSDTable) <- paste('K = ', K_vec, sep = '')
 knitr::kable(scaledSDTable)
 ```
 
+##### Scaled sandwich variance
+
+```{r "calculate-sandwich-variance-CI-model-1", cache = TRUE}
+scaledSVAR <- data.frame() %>% tbl_df()
+# Read in data
+for(i in 1:nsim){
+  ValSim <- read.table(file = paste0(datLoc, 'uni_beta_vector_simID_', i, '_SCEN_', SCEN, '.txt'),
+         col.names = c("beta", "sVariance", "K", "nRSloops", "TrueBeta"), header = TRUE) %>% 
+        tbl_df()
+  # CI using mean sandwich variance of beta with scaling
+  svarScale_tmp <- ValSim %>% group_by(K, nRSloops, TrueBeta) %>% 
+          summarise(AvgBeta = mean(beta, na.rm = TRUE),  
+                    AvgSvarBeta = mean(sVariance, na.rm = TRUE)) %>%
+          mutate(CIlow =  AvgBeta - (qnorm(0.025, lower.tail = FALSE) *
+                                       sqrt(AvgSvarBeta) * sqrt(K/n)),
+              CIup = AvgBeta + (qnorm(0.025, lower.tail = FALSE) * 
+                                  sqrt(AvgSvarBeta) * sqrt(K/n)),
+              type = 'scaledSVAR') %>% 
+          ungroup() %>% rowwise() %>% 
+          mutate(coverage_ind = ifelse(TrueBeta >= CIlow && TrueBeta <= CIup, 1, 0),
+              sim = i)
+  
+  # Collect the values over all simulations
+  scaledSVAR <- bind_rows(scaledSVAR,svarScale_tmp)
+}
+```
+
+
+```{r "plot-scaled-svar-CI-model-1", echo = FALSE, fig.align = 'center', fig.width = 5, fig.height=6}
+ToPlotCI <- scaledSVAR %>%  filter(K %in% c(230, 1000) & nRSloops %in% c(230, 1000)) %>% 
+  group_by(K, nRSloops) %>%
+  slice(seq(1, nsim, length.out = 100)) %>% ungroup()
+ToPlotCI$K <- factor(ToPlotCI$K, levels = c(230, 1000), labels = c('K = 230', 'K = 1000'))
+ToPlotCI$nRSloops <- factor(ToPlotCI$nRSloops, levels = c(230, 1000), labels = c('B = 230', 'B = 1000'))
+
+ggplot(ToPlotCI, aes(x = TrueBeta)) + geom_vline(aes(xintercept = TrueBeta), size = .8, alpha = .8) +
+   geom_point(aes(x = AvgBeta, y = sim, colour = factor(coverage_ind)), size = 0.5) + 
+   geom_segment(aes(x = CIlow, xend = CIup, y = sim, yend = sim, colour = factor(coverage_ind), alpha = factor(coverage_ind)), size = 0.9) + 
+  facet_wrap(K ~ nRSloops, dir = 'v') +
+  scale_alpha_manual("Contains true value", values = c(1,0.8), labels = c("NO", "YES")) +
+  scale_colour_manual("Contains true value", values = c('#d95f02', '#1b9e77'), labels = c("NO", "YES")) +
+   scale_x_continuous("beta") + scale_y_continuous("simulation") +
+  theme(legend.position="bottom") +
+   ggtitle("100 random selected simulations with the 95% CI", subtitle = "scaled mean sandwich variance estimator")
+```
+
+```{r "table-scaled-svar-model-1"}
+scaledSVARtable_tmp <- scaledSVAR %>% group_by(K,nRSloops) %>% summarise(EC = mean(coverage_ind))
+scaledSVARtable <- matrix(scaledSVARtable_tmp$EC, ncol = length(nRSloops_vec), byrow = TRUE)
+colnames(scaledSVARtable) <- paste('B = ', nRSloops_vec, sep = '')
+rownames(scaledSVARtable) <- paste('K = ', K_vec, sep = '')
+knitr::kable(scaledSVARtable)
+```
+
+
+##### Sandwich variance estimator CI
+
+After talking with Jan, it should really be:
+
+$$
+\left[ \widehat{\beta_{final}} \pm z_{1-\alpha/2} \times \sqrt{\frac{1}{B^2} \sum_{i=1}^B \widehat{\text{Var}(\beta_i)}} \right]
+$$
+As you have B parts of K datapoints. To get $\widehat{\beta}_{final}$, which is the end estimate, you take the mean of the B estimates. Hence you sum and divide by $B$. The variance of a constant times the sum equals the squared constant times the sum of the variance. If, the B parts are independent!
+<br>
+However, in our subsampling scheme, this is not the case! So I expect some worse coverages here, but a better coverage in the bag of m-ou-of-n bootstrap procedure. 
+
+```{r "calculate-correct-sandwich-variance-CI-model-1", cache = TRUE}
+SummedSvar <- data.frame() %>% tbl_df()
+# Read in data
+for(i in 1:nsim){
+  ValSim <- read.table(file = paste0(datLoc, 'uni_beta_vector_simID_', i, '_SCEN_', SCEN, '.txt'),
+         col.names = c("beta", "sVariance", "K", "nRSloops", "TrueBeta"), header = TRUE) %>% 
+        tbl_df()
+  # CI through now summing sandwich variance of beta
+  SummedSvar_tmp <- ValSim %>% group_by(K, nRSloops, TrueBeta) %>% 
+          summarise(AvgBeta = mean(beta, na.rm = TRUE),  
+                    SummedSvar = sum(sVariance, na.rm = TRUE)) %>%
+          mutate(bVar = SummedSvar * (1/nRSloops^2),
+              CIlow =  AvgBeta - (qnorm(0.025, lower.tail = FALSE) *
+                                       sqrt(bVar)),
+              CIup = AvgBeta + (qnorm(0.025, lower.tail = FALSE) * 
+                                  sqrt(bVar)),
+              type = 'avSVar',  sim = i,
+              coverage_ind = 
+                ifelse(TrueBeta >= CIlow && TrueBeta <= CIup, 1, 0))
+  
+  # Collect the values over all simulations
+  SummedSvar <- bind_rows(SummedSvar,SummedSvar_tmp)
+}
+```
+
+
+```{r "plot-correct-svar-CI-model-1", echo = FALSE, fig.align = 'center', fig.width = 5, fig.height=6}
+ToPlotCI <- SummedSvar %>%  filter(K %in% c(230, 1000) & nRSloops %in% c(230, 1000)) %>% 
+  group_by(K, nRSloops) %>%
+  slice(seq(1, nsim, length.out = 100)) %>% ungroup()
+ToPlotCI$K <- factor(ToPlotCI$K, levels = c(230, 1000), labels = c('K = 230', 'K = 1000'))
+ToPlotCI$nRSloops <- factor(ToPlotCI$nRSloops, levels = c(230, 1000), labels = c('B = 230', 'B = 1000'))
+
+ggplot(ToPlotCI, aes(x = TrueBeta)) + 
+  geom_vline(aes(xintercept = TrueBeta), size = .8, alpha = .8) +
+   geom_point(aes(x = AvgBeta, y = sim, colour = factor(coverage_ind)), size = 0.5) + 
+   geom_segment(aes(x = CIlow, xend = CIup, y = sim, yend = sim, colour = factor(coverage_ind), alpha = factor(coverage_ind)), size = 0.9) + 
+  facet_wrap(K ~ nRSloops, dir = 'v') +
+  scale_alpha_manual("Contains true value", values = c(1,0.8), labels = c("NO", "YES")) +
+  scale_colour_manual("Contains true value", values = c('#d95f02', '#1b9e77'), labels = c("NO", "YES")) +
+   scale_x_continuous("beta") + scale_y_continuous("simulation") +
+  theme(legend.position="bottom") +
+   ggtitle("100 random selected simulations with the 95% CI", subtitle = "correct mean sandwich variance estimator")
+```
+
+```{r "table-correct-svar-model-1"}
+SummedSvartable_tmp <- SummedSvar %>% group_by(K,nRSloops) %>% summarise(EC = mean(coverage_ind))
+SummedSvartable <- matrix(SummedSvartable_tmp$EC, ncol = length(nRSloops_vec), byrow = TRUE)
+colnames(SummedSvartable) <- paste('B = ', nRSloops_vec, sep = '')
+rownames(SummedSvartable) <- paste('K = ', K_vec, sep = '')
+knitr::kable(SummedSvartable)
+```
 
 
 ### Model 2
@@ -1133,9 +1267,6 @@ SCEN <- 2
 
 Start with estimated $\beta$:
 ```{r echo = FALSE}
-# parameters 
-nsim <- 500
-
 # Data frame with all values over 1000 simulations
 valuesAllSim <- timeAllSim <- data.frame() %>% tbl_df()
 
@@ -1150,7 +1281,8 @@ for(i in 1:nsim){
   if(i %in% progress) print(paste0("At ", i/nsim*100, "%"))
   # Values in one simulation: estimated beta values averaged within the sampling algorithm
   ValSim <-  try(read.table(file = paste0(datLoc, 'uni_beta_vector_simID_', i, '_SCEN_', SCEN, '.txt'),
-               col.names = c("beta", "sVariance", "K", "nRSloops", "TrueBeta"), header = TRUE) %>% tbl_df() %>%
+               col.names = c("beta", "sVariance", "K", "nRSloops", "TrueBeta"), 
+               header = TRUE) %>% tbl_df() %>%
       group_by(K, nRSloops) %>% summarise(avBeta = mean(beta)) %>% 
       mutate(sim = i), silent = TRUE)
   if(class(ValSim) == "try-error"){
@@ -1245,9 +1377,6 @@ SCEN <- 3
 
 Start with estimated $\beta$:
 ```{r echo = FALSE}
-# parameters 
-nsim <- 1000
-
 # Data frame with all values over 1000 simulations
 valuesAllSim <- timeAllSim <- data.frame() %>% tbl_df()
 
@@ -1282,7 +1411,7 @@ for(i in 1:nsim){
 ```
 
 Same for computational time:
-```{r results = 'hide', cache = TRUE}
+```{r "load-time-model-3", results = 'hide', cache.rebuild = TRUE}
 # load in computational time
 for(i in 1:nsim){
   if(i %in% progress) print(paste0("At ", i/nsim*100, "%"))
@@ -1306,7 +1435,6 @@ group_by(valuesAllSim, K, nRSloops) %>% summarise(avBeta = mean(beta.X_smartph_h
 
 Plotting the estimated $\beta$ parameters for each simulation through facetting on the number of iterations (**B**).
 
-
 ```{r "beta-model-3", echo=FALSE, fig.align="center"}
 ggplot(valuesAllSim, aes(x = K, y = beta.X_smartph_hrs)) + 
   geom_point(size = 0.7, colour = "#67a9cf") + 
@@ -1314,13 +1442,23 @@ ggplot(valuesAllSim, aes(x = K, y = beta.X_smartph_hrs)) +
   scale_x_continuous(name = "Number of samples (K) in one iteration",
                      breaks = seq(min(pairs$K), max(pairs$K),length.out = 4)) +
   scale_y_continuous(name = expression(hat(beta))) +
-  geom_line(data = mutate(.data = valuesAllSim, TrueValue = trueBeta, Label = "True Value of Beta"),
+  geom_line(data = mutate(.data = valuesAllSim, TrueValue = TrueBeta, Label = "True Value of Beta"),
              aes(y = TrueValue, linetype = Label), size = 0.7, show.legend = TRUE) +
   scale_linetype_discrete(name = "") +
   ggtitle("Estimated beta parameter given the number of iterations (B)") +
   theme_minimal() +
   theme(axis.text.x=element_text(angle = -75, hjust = 0),
         legend.position = "bottom")
+```
+
+```{r "calculate-MSE-model-3"}
+MSEtable_tmp <- group_by(valuesAllSim, K, nRSloops) %>% mutate(SE = (beta.X_smartph_hrs - TrueBeta)^2) %>%
+  summarise(MSE = mean(SE, na.rm = TRUE))
+MSEtable <- matrix(MSEtable_tmp$MSE, ncol = length(nRSloops_vec), byrow = TRUE)
+colnames(MSEtable) <- paste('B = ', nRSloops_vec, sep = '')
+rownames(MSEtable) <- paste('K = ', K_vec, sep = '')
+options( scipen = 6 )
+knitr::kable(MSEtable)
 ```
 
 Plotting the computational time.
@@ -1504,3 +1642,309 @@ rownames(scaledSDTable) <- paste('K = ', K_vec, sep = '')
 knitr::kable(scaledSDTable)
 ```
 
+##### Sandwich variance estimator CI
+
+
+```{r "calculate-correct-sandwich-variance-CI-model-3", cache = TRUE}
+S3_colnames <- c("beta.X_smartph_hrs", "beta.X_sex", 
+                 "beta.X_econArea",  "beta.X_ethnic", 
+                 "sVariance.X_smartph_hrs", "sVariance.X_sex",
+                 "sVariance.X_econArea", 
+                 "sVariance.X_ethnic",  "K", "nRSloops", "TrueBeta")
+
+SummedSvar <- data.frame() %>% tbl_df()
+# Read in data
+for(i in 1:nsim){
+  ValSim <- read.table(file = paste0(datLoc, 'uni_beta_vector_simID_', i, '_SCEN_', SCEN, '.txt'),
+         col.names = S3_colnames, header = TRUE) %>% 
+        tbl_df()
+  ValSim <- rename(ValSim, beta = beta.X_smartph_hrs, sVariance = sVariance.X_smartph_hrs)
+  # CI through now summing sandwich variance of beta
+  SummedSvar_tmp <- ValSim %>% group_by(K, nRSloops, TrueBeta) %>% 
+          summarise(AvgBeta = mean(beta, na.rm = TRUE),  
+                    SummedSvar = sum(sVariance, na.rm = TRUE)) %>%
+          mutate(bVar = SummedSvar * (1/nRSloops^2),
+              CIlow =  AvgBeta - (qnorm(0.025, lower.tail = FALSE) *
+                                       sqrt(bVar)),
+              CIup = AvgBeta + (qnorm(0.025, lower.tail = FALSE) * 
+                                  sqrt(bVar)),
+              type = 'avSVar',  sim = i,
+              coverage_ind = 
+                ifelse(TrueBeta >= CIlow && TrueBeta <= CIup, 1, 0))
+  
+  # Collect the values over all simulations
+  SummedSvar <- bind_rows(SummedSvar,SummedSvar_tmp)
+}
+```
+
+
+```{r "plot-correct-svar-CI-model-3", echo = FALSE, fig.align = 'center', fig.width = 5, fig.height=6}
+ToPlotCI <- SummedSvar %>%  filter(K %in% c(230, 1000) & nRSloops %in% c(230, 1000)) %>% 
+  group_by(K, nRSloops) %>%
+  slice(seq(1, nsim, length.out = 100)) %>% ungroup()
+ToPlotCI$K <- factor(ToPlotCI$K, levels = c(230, 1000), labels = c('K = 230', 'K = 1000'))
+ToPlotCI$nRSloops <- factor(ToPlotCI$nRSloops, levels = c(230, 1000), labels = c('B = 230', 'B = 1000'))
+
+ggplot(ToPlotCI, aes(x = TrueBeta)) + 
+  geom_vline(aes(xintercept = TrueBeta), size = .8, alpha = .8) +
+   geom_point(aes(x = AvgBeta, y = sim, colour = factor(coverage_ind)), size = 0.5) + 
+   geom_segment(aes(x = CIlow, xend = CIup, y = sim, yend = sim, colour = factor(coverage_ind), alpha = factor(coverage_ind)), size = 0.9) + 
+  facet_wrap(K ~ nRSloops, dir = 'v') +
+  scale_alpha_manual("Contains true value", values = c(1,0.8), labels = c("NO", "YES")) +
+  scale_colour_manual("Contains true value", values = c('#d95f02', '#1b9e77'), labels = c("NO", "YES")) +
+   scale_x_continuous("beta") + scale_y_continuous("simulation") +
+  theme(legend.position="bottom") +
+   ggtitle("100 random selected simulations with the 95% CI", subtitle = "Average sandwich variance estimator")
+```
+
+```{r "table-correct-svar-model-3"}
+SummedSvartable_tmp <- SummedSvar %>% group_by(K,nRSloops) %>% summarise(EC = mean(coverage_ind))
+SummedSvartable <- matrix(SummedSvartable_tmp$EC, ncol = length(nRSloops_vec), byrow = TRUE)
+colnames(SummedSvartable) <- paste('B = ', nRSloops_vec, sep = '')
+rownames(SummedSvartable) <- paste('K = ', K_vec, sep = '')
+knitr::kable(SummedSvartable)
+```
+
+
+### Model 4
+
+Parameters:
+```{r "model-4-parameters", cache.rebuild = TRUE}
+u <- 10
+alpha <- 1
+sigma <- 5
+trueBeta <- alpha/(sqrt(2) * sigma)
+# Model (called SCEN in script)
+SCEN <- 4
+```
+
+#### Load in data
+
+Start with estimated $\beta$:
+```{r echo = FALSE}
+# Data frame with all values over all simulations
+valuesAllSim <- timeAllSim <- data.frame() %>% tbl_df()
+
+# Progress
+progress <- floor(seq(1,nsim,length.out = 11)[-1])
+```
+
+
+```{r "load-beta-model-4", results = 'hide', cache = TRUE}
+# load in estimated beta values
+for(i in 1:nsim){
+  if(i %in% progress) print(paste0("At ", i/nsim*100, "%"))
+  # Values in one simulation: estimated beta values averaged within the sampling algorithm
+  ValSim <-  try(read.table(file = paste0(datLoc, 'uni_beta_vector_simID_', i, '_SCEN_', SCEN, '.txt'),
+               col.names = c("beta", "sVariance", "K", "nRSloops", "TrueBeta"), 
+               header = TRUE) %>% tbl_df() %>%
+      group_by(K, nRSloops, TrueBeta) %>% summarise(avBeta = mean(beta)) %>% 
+      mutate(sim = i), silent = TRUE)
+  if(class(ValSim)[1] == "try-error"){
+    print(i);next
+  }
+  # Add to data frame with all simulations
+  valuesAllSim <- bind_rows(valuesAllSim, ValSim)
+}
+```
+
+Same for computational time:
+```{r "load-time-model-4", results = 'hide', cache = TRUE}
+# load in computational time
+for(i in 1:nsim){
+  if(i %in% progress) print(paste0("At ", i/nsim*100, "%"))
+  # Values in one simulation: computational time 
+  TimeSim <-  try(read.table(file = paste0(datLoc, 'uni_time_vector_simID_', i, '_SCEN_', SCEN, '.txt'),
+              col.names = c("minutes"), header = TRUE) %>% tbl_df() %>%
+              bind_cols(., pairs) %>% 
+              mutate(sim = i), silent = TRUE)
+    if(class(TimeSim)[1] == "try-error"){
+    print(i);next
+  }
+  # Add to data frame with all simulations
+  timeAllSim <- bind_rows(timeAllSim, TimeSim)
+}
+```
+
+#### Bias vs computational time
+
+Quick summary:
+```{r collapse = TRUE}
+tbl_df(valuesAllSim)
+group_by(valuesAllSim, K, nRSloops) %>% summarise(avBeta = mean(avBeta)) %>% summary()
+```
+
+Plotting the estimated $\beta$ parameters for each simulation through facets on the number of iterations (**B**).
+
+```{r "beta-model-4", echo=FALSE, fig.align="center"}
+ggplot(valuesAllSim, aes(x = K, y = avBeta)) + 
+  geom_point(size = 0.7, colour = "#67a9cf") + 
+  facet_grid(. ~ factor(nRSloops)) +
+  scale_x_continuous(name = "Number of samples (K) in one iteration",
+                     breaks = seq(min(pairs$K), max(pairs$K),length.out = 4)) +
+  scale_y_continuous(name = expression(hat(beta))) +
+  geom_line(data = mutate(.data = valuesAllSim, TrueValue = TrueBeta, Label = "True Value of Beta"),
+             aes(y = TrueValue, linetype = Label), size = 0.7, show.legend = TRUE) +
+  scale_linetype_discrete(name = "") +
+  ggtitle("Estimated beta parameter given the number of iterations (B)") +
+  theme_minimal() +
+  theme(axis.text.x=element_text(angle = -75, hjust = 0),
+        legend.position = "bottom")
+```
+
+```{r "calculate-MSE-model-4"}
+MSEtable_tmp <- group_by(valuesAllSim, K, nRSloops) %>% mutate(SE = (avBeta - TrueBeta)^2) %>%
+  summarise(MSE = mean(SE, na.rm = TRUE))
+MSEtable <- matrix(MSEtable_tmp$MSE, ncol = length(nRSloops_vec), byrow = TRUE)
+colnames(MSEtable) <- paste('B = ', nRSloops_vec, sep = '')
+rownames(MSEtable) <- paste('K = ', K_vec, sep = '')
+options( scipen = 6 )
+knitr::kable(MSEtable)
+```
+
+Plotting the computational time.
+
+```{r "time-model-4", echo=FALSE, fig.align="center"}
+TimeToPlot <- timeAllSim %>% group_by(B,K) %>% summarise(AvgMin = mean(minutes))
+  TimeToPlot$B <- factor(TimeToPlot$B)
+  TimeToPlot$K <- factor(TimeToPlot$K)
+
+ggplot(data = TimeToPlot, aes(x = K, y = AvgMin, group = B)) + 
+  geom_line(aes(colour = B),size = 1) +
+  scale_y_continuous(name = "Minutes",
+                     limits = c(0,max(TimeToPlot$AvgMin) + 2)) + 
+  scale_x_discrete(name = "Number of samples (K) in one iteration") +
+  scale_color_brewer(name = "Number of \niterations (B)",
+                     type = "diverging", palette = "RdYlBu") +
+  guides(colour = guide_legend(override.aes = list(size=2))) + 
+  ggtitle("Average computational time to estimate PIM on HPC") +
+  theme_minimal()
+```
+
+#### Distribution of estimator
+
+```{r "QQplot-model-4", fig.show='hold', fig.width=10}
+for(j in 1:length(nRSloops_vec)){
+  K_temp <- K_vec[j]
+  B_temp <- nRSloops_vec[j]
+  assign(paste0("Plot", j),
+    valuesAllSim %>% filter(K == K_temp & nRSloops == B_temp) %>% 
+    select(avBeta) %>% unlist(.) %>% 
+    as.numeric() %>% gg_qq(x = ., title = paste0('K = ', K_temp, ' and B = ', B_temp))
+  )
+}
+
+cowplot::plot_grid(Plot1, Plot2, Plot3, Plot4, Plot5, Plot6, labels = c("A", "B", "C", "D", "E", "F"), ncol = 3)
+cowplot::plot_grid(Plot7, Plot8, Plot9, Plot10, labels = c("G", "H", "I", "J"), ncol = 3)
+```
+
+
+#### Emperical CI coverage
+
+##### Bootstrap m-out-of n
+
+Again, scale the CI according to bootstrap m-out-of n theory.
+
+```{r "calculate-m-out-of-n-CI-model-4", cache = TRUE}
+scaledSD <- data.frame() %>% tbl_df()
+# Read in data (again, sigh)
+for(i in 1:nsim){
+  ValSim <- read.table(file = paste0(datLoc, 'uni_beta_vector_simID_', i, '_SCEN_', SCEN, '.txt'),
+         col.names = c("beta", "sVariance", "K", "nRSloops", "TrueBeta"), 
+         header = TRUE) %>% 
+          tbl_df()
+  # CI using SD of beta with scaling
+  sdScale_tmp <- ValSim %>% group_by(K, nRSloops, TrueBeta) %>% 
+          summarise(AvgBeta = mean(beta, na.rm = TRUE),  
+                    sdBeta = sd(beta, na.rm = TRUE)) %>%
+          mutate(CIlow =  AvgBeta - (qnorm(0.025, lower.tail = FALSE) * sdBeta * sqrt(K/n)),
+              CIup = AvgBeta + (qnorm(0.025, lower.tail = FALSE) * sdBeta * sqrt(K/n)),
+              type = 'scaledSD') %>% 
+          ungroup() %>% rowwise() %>% 
+          mutate(coverage_ind = ifelse(TrueBeta >= CIlow && TrueBeta <= CIup, 1, 0),
+              sim = i)
+  # Collect the values over all simulations
+  scaledSD <- bind_rows(scaledSD,sdScale_tmp)
+}
+```
+
+
+```{r "plot-CI-model-4", echo = FALSE, fig.align = 'center', fig.width = 5, fig.height=6}
+ToPlotCI <- scaledSD %>%  filter(K %in% c(230, 1000) & nRSloops %in% c(230, 1000)) %>% 
+  group_by(K, nRSloops) %>%
+  slice(seq(1, nsim, length.out = 100)) %>% ungroup()
+ToPlotCI$K <- factor(ToPlotCI$K, levels = c(230, 1000), labels = c('K = 230', 'K = 1000'))
+ToPlotCI$nRSloops <- factor(ToPlotCI$nRSloops, levels = c(230, 1000), labels = c('B = 230', 'B = 1000'))
+
+ggplot(ToPlotCI, aes(x = TrueBeta)) + geom_vline(aes(xintercept = TrueBeta), size = .8, alpha = .8) +
+   geom_point(aes(x = AvgBeta, y = sim, colour = factor(coverage_ind)), size = 0.5) + 
+   geom_segment(aes(x = CIlow, xend = CIup, y = sim, yend = sim, colour = factor(coverage_ind), alpha = factor(coverage_ind)), size = 0.9) + 
+  facet_wrap(K ~ nRSloops, dir = 'v') +
+  scale_alpha_manual("Contains true value", values = c(1,0.8), labels = c("NO", "YES")) +
+  scale_colour_manual("Contains true value", values = c('#d95f02', '#1b9e77'), labels = c("NO", "YES")) +
+   scale_x_continuous("beta") + scale_y_continuous("simulation") +
+  theme(legend.position="bottom") +
+   ggtitle("100 random selected simulations with the 95% CI")
+```
+
+```{r "table-scaled-sd-model-4", cache.rebuild = TRUE}
+scaledSDTable_tmp <- scaledSD %>% group_by(K,nRSloops) %>% summarise(EC = mean(coverage_ind))
+scaledSDTable <- matrix(scaledSDTable_tmp$EC, ncol = length(nRSloops_vec), byrow = TRUE)
+colnames(scaledSDTable) <- paste('B = ', nRSloops_vec, sep = '')
+rownames(scaledSDTable) <- paste('K = ', K_vec, sep = '')
+knitr::kable(scaledSDTable)
+```
+
+##### Sandwich variance estimator CI
+
+```{r "calculate-correct-sandwich-variance-CI-model-4", cache = TRUE}
+SummedSvar <- data.frame() %>% tbl_df()
+# Read in data
+for(i in 1:nsim){
+  ValSim <- read.table(file = paste0(datLoc, 'uni_beta_vector_simID_', i, '_SCEN_', SCEN, '.txt'),
+         col.names = c("beta", "sVariance", "K", "nRSloops", "TrueBeta"), header = TRUE) %>% 
+        tbl_df()
+  # CI through now summing sandwich variance of beta
+  SummedSvar_tmp <- ValSim %>% group_by(K, nRSloops, TrueBeta) %>% 
+          summarise(AvgBeta = mean(beta, na.rm = TRUE),  
+                    SummedSvar = sum(sVariance, na.rm = TRUE)) %>%
+          mutate(bVar = SummedSvar * (1/nRSloops^2),
+              CIlow =  AvgBeta - (qnorm(0.025, lower.tail = FALSE) *
+                                       sqrt(bVar)),
+              CIup = AvgBeta + (qnorm(0.025, lower.tail = FALSE) * 
+                                  sqrt(bVar)),
+              type = 'avSVar',  sim = i,
+              coverage_ind = 
+                ifelse(TrueBeta >= CIlow && TrueBeta <= CIup, 1, 0))
+  
+  # Collect the values over all simulations
+  SummedSvar <- bind_rows(SummedSvar,SummedSvar_tmp)
+}
+```
+
+```{r "plot-correct-svar-CI-model-4", echo = FALSE, fig.align = 'center', fig.width = 5, fig.height=6}
+ToPlotCI <- SummedSvar %>%  filter(K %in% c(230, 1000) & nRSloops %in% c(230, 1000)) %>% 
+  group_by(K, nRSloops) %>%
+  slice(seq(1, nsim, length.out = 100)) %>% ungroup()
+ToPlotCI$K <- factor(ToPlotCI$K, levels = c(230, 1000), labels = c('K = 230', 'K = 1000'))
+ToPlotCI$nRSloops <- factor(ToPlotCI$nRSloops, levels = c(230, 1000), labels = c('B = 230', 'B = 1000'))
+
+ggplot(ToPlotCI, aes(x = TrueBeta)) + 
+  geom_vline(aes(xintercept = TrueBeta), size = .8, alpha = .8) +
+   geom_point(aes(x = AvgBeta, y = sim, colour = factor(coverage_ind)), size = 0.5) + 
+   geom_segment(aes(x = CIlow, xend = CIup, y = sim, yend = sim, colour = factor(coverage_ind), alpha = factor(coverage_ind)), size = 0.9) + 
+  facet_wrap(K ~ nRSloops, dir = 'v') +
+  scale_alpha_manual("Contains true value", values = c(1,0.8), labels = c("NO", "YES")) +
+  scale_colour_manual("Contains true value", values = c('#d95f02', '#1b9e77'), labels = c("NO", "YES")) +
+   scale_x_continuous("beta") + scale_y_continuous("simulation") +
+  theme(legend.position="bottom") +
+   ggtitle("100 random selected simulations with the 95% CI", subtitle = "Average sandwich variance estimator")
+```
+
+```{r "table-correct-svar-model-4"}
+SummedSvartable_tmp <- SummedSvar %>% group_by(K,nRSloops) %>% summarise(EC = mean(coverage_ind))
+SummedSvartable <- matrix(SummedSvartable_tmp$EC, ncol = length(nRSloops_vec), byrow = TRUE)
+colnames(SummedSvartable) <- paste('B = ', nRSloops_vec, sep = '')
+rownames(SummedSvartable) <- paste('K = ', K_vec, sep = '')
+knitr::kable(SummedSvartable)
+```
