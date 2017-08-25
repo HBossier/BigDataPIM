@@ -1,11 +1,11 @@
 #!/bin/sh
 #
 #
-#PBS -N BLBS3
+#PBS -N BLBS4
 #PBS -o output/output.file
 #PBS -e error/error.file
 #PBS -m a
-#PBS -l walltime=05:00:00
+#PBS -l walltime=11:30:00
 #PBS -l vmem=40GB
 #PBS -l nodes=1:ppn=1
 #
@@ -24,7 +24,7 @@ cd $srcdir
 
 #----------------------------------------------------#
 # WHICH SCENARIO
-SCEN=1
+SCEN=4
 echo 'scenario ' $SCEN
 #----------------------------------------------------#
 
