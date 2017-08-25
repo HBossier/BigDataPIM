@@ -1,5 +1,5 @@
 ####################
-#### TITLE:     Run resampling scheme for large N: bag of little bootstraps
+#### TITLE:     Run resampling scheme for large N: bag of little m out of n bootstraps
 #### Contents:  
 ####
 #### Source Files: //Mastat/Thesis
@@ -14,7 +14,7 @@
 ##########
 ##
 
-# In this script, we run the bag of little bootstraps (BLB) algorithm on large PIM datasets
+# In this script, we run the bag of little m out of n bootstraps (BLmnB) algorithm on large PIM datasets
 
 # Not yet integrated within PIM package.
 
@@ -38,11 +38,11 @@ library(ggplot2)
 library(nleqslv)
 library(parallel)
 
-# BOOLEAN for development/preparing BLB on HPC
+# BOOLEAN for development = TRUE or preparing BmnB on HPC = FALSE
 DEVELOPMENT <- FALSE
 
 # Scenario
-SCEN <- 3
+SCEN <- 4
 
 # Seed
 StartingSeed <- 11 * SCEN
@@ -83,9 +83,16 @@ if(SCEN == 3){
   sigma <- 9.51
   trueBeta <- alpha_1/(sqrt(2) * sigma)
 }
+# Fourth scenario: one that should work according to Thas et al. 2012
+if(SCEN == 4){
+  alpha <- 1
+  u <- 10
+  sigma <- 5
+  trueBeta <- alpha/(sqrt(2) * sigma)
+}
 
 # Different data generating models in different scenario's
-if(SCEN %in% c(1,2)){
+if(SCEN %in% c(1,2,4)){
   # Generate predictor
   X <- runif(n = n, min = 0.1, max = u)
   
@@ -218,7 +225,7 @@ if(SCEN == 1){
 
 # If preparing for HPC, then start here 
 if(!isTRUE(DEVELOPMENT)){
-  
+  rm(OrigData)
   # Possible to use up to 100 cores simultaneously
     # Hence, ideally subdivide in 100 parts, each part is a bag.
     # Number of bags (S)
@@ -226,19 +233,23 @@ if(!isTRUE(DEVELOPMENT)){
   # 100 bootstraps/bag
   boots <- 100
   # Max size of the bags
-  sizeB <- dim(OrigData)[1] / cores
+  sizeB <- n / cores
   
   # Vector of number of simulations
   nsim_vec <- 1:1000
+  
+  # Progress
+  progress <- floor(quantile(nsim_vec, probs = c(seq(0,0.9,by = .1))))
 
   # Generate a new complete dataset for each simulation
   # Then split in S parts.
   for(i in 1:length(nsim_vec)){
+    if(i %in% progress) print(paste0('At ', i/length(nsim_vec) * 100, '%'))
     # Start with creating data: same seed as non optimal resampling method
     set.seed(StartingSeed + (StartingSeed * i))
     
     # Different data generating models in different scenario's
-    if(SCEN %in% c(1,2)){
+    if(SCEN %in% c(1,2,4)){
       # Generate predictor
       X <- runif(n = n, min = 0.1, max = u)
       
