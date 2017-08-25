@@ -143,7 +143,7 @@ Based on a linear regression, we find the regression parameters, the proportions
 
 ## Simulations and results
 
-Over 1000 simulations, we apply the resampling technique. We limit this report to **K = 230** and **B = 230**. Hence, in each simulation, we have 230 values, which are based on sampling 230 datapoints from the original dataset. We choose these parameters as they result in reasonable unbiased estimates while keeping the computational time under control.
+Over 1000 simulations, we apply the resampling technique. In this section, we set **K = 230** and **B = 230**. Hence, in each simulation, we have 230 values, which are based on sampling 230 datapoints from the original dataset. We choose these parameters as they result in reasonable unbiased estimates while keeping the computational time under control.
 
 ```{r "simulation-options", cache.rebuild = TRUE}
 # Select K and B
