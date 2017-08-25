@@ -1,0 +1,788 @@
+---
+title: "Optimal.Rmd"
+author: "Han Bossier"
+date: "17-8-2017"
+output:
+  html_document:
+    theme: journal
+    toc: yes
+  pdf_document:
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	comment = NA,
+	cache = TRUE,
+	warning = FALSE
+)
+
+# libraries
+library(ggplot2)
+library(dplyr)
+library(ggthemes)
+library(RColorBrewer)
+library(boot)
+library(parallel)
+
+# Custom QQ plot function
+gg_qq <- function(x, distribution = "norm", ..., line.estimate = NULL, conf = 0.95,
+                  labels = names(x), title = NULL){
+  q.function <- eval(parse(text = paste0("q", distribution)))
+  d.function <- eval(parse(text = paste0("d", distribution)))
+  x <- na.omit(x)
+  ord <- order(x)
+  n <- length(x)
+  P <- ppoints(length(x))
+  df <- data.frame(ord.x = x[ord], z = q.function(P, ...))
+
+  if(is.null(line.estimate)){
+    Q.x <- quantile(df$ord.x, c(0.25, 0.75))
+    Q.z <- q.function(c(0.25, 0.75), ...)
+    b <- diff(Q.x)/diff(Q.z)
+    coef <- c(Q.x[1] - b * Q.z[1], b)
+  } else {
+    coef <- coef(line.estimate(ord.x ~ z))
+  }
+
+  zz <- qnorm(1 - (1 - conf)/2)
+  SE <- (coef[2]/d.function(df$z)) * sqrt(P * (1 - P)/n)
+  fit.value <- coef[1] + coef[2] * df$z
+  df$upper <- fit.value + zz * SE
+  df$lower <- fit.value - zz * SE
+
+  if(!is.null(labels)){ 
+    df$label <- ifelse(df$ord.x > df$upper | df$ord.x < df$lower, labels[ord],"")
+    }
+
+  p <- ggplot(df, aes(x=z, y=ord.x)) +
+    geom_point() + 
+    geom_abline(intercept = coef[1], slope = coef[2]) +
+    geom_ribbon(aes(ymin = lower, ymax = upper), alpha=0.2) + 
+    scale_x_continuous(name = 'Normal Quantiles') + 
+    scale_y_continuous(name = 'Sample Quantiles') +
+      ggtitle("QQ-plot", subtitle = title)
+  if(!is.null(labels)) p <- p + geom_text( aes(label = label))
+  #print(p)
+  return(p)
+}
+
+# Get info on machine we are compiling
+OS <- Sys.info()['machine']
+if(OS == 'x86_64'){
+  MACHINE <- "MAC"
+  wd <- '/Users/hanbossier/Dropbox/Mastat/Thesis/BigDataPIM'
+}else{
+  MACHINE <- "DOS"
+  wd <- 'D:/Users/Han/Dropbox/Mastat/Thesis/BigDataPIM'
+}
+```
+
+
+## Introduction
+
+For later
+
+## Optimal Subsampling without replacement - Unweighted Estimator
+
+### Simulations
+
+```{r "simulation parameters", echo = FALSE}
+# location of data
+if(MACHINE == "MAC"){
+datLoc <- "/Volumes/1_5_TB_Han_HDD/Mastat/Thesis/BigDataPIM/Leverage/NonReplace/"  
+}
+if(MACHINE == "DOS"){
+datLoc <- ""  
+}
+
+# number of simulations 
+nsim <- 1000
+
+# Confidence level (for CI section)
+level <- 0.95
+
+# Sample size
+n <- 250000
+
+# Vector of number of resampling loops
+nRSloops_vec <- floor(seq(10,1000,length.out = 10))
+
+# Vector of number of selected datapoints K per iteraton 
+K_vec <- floor(seq(10,1000,length.out = 10))
+
+# Number of pairs/combinations between number of resampling loops and sampled data 
+pairs <- expand.grid(B = nRSloops_vec, K = K_vec)
+```
+
+### Results
+
+#### Model 1
+
+
+#### Model 2 (3)
+
+Parameters:
+```{r "model-3-parameters-no-replacement", cache.rebuild = TRUE}
+alpha_1 <- -0.43
+# Sigma based on dataset
+sigma <- 9.51
+trueBeta <- alpha_1/(sqrt(2) * sigma)
+# Model (called SCEN in script)
+SCEN <- 3
+```
+
+##### Load in data
+
+Start with estimated $\beta$:
+```{r echo = FALSE}
+# Data frame with all values over 1000 simulations
+valuesAllSim <- timeAllSim <- data.frame() %>% tbl_df()
+
+# Progress
+progress <- floor(seq(1,nsim,length.out = 11)[-1])
+```
+
+
+```{r "load-beta-model-3", results = 'hide', cache = TRUE}
+S3_colnames <- c("beta.X_smartph_hrs", "beta.X_sex", 
+                 "beta.X_econArea",  "beta.X_ethnic", 
+                 "sVariance.X_smartph_hrs", "sVariance.X_sex",
+                 "sVariance.X_econArea", 
+                 "sVariance.X_ethnic",  "K", "nRSloops", "TrueBeta")
+
+# load in estimated beta values
+for(i in 1:nsim){
+  if(i %in% progress) print(paste0("At ", i/nsim*100, "%"))
+  # Values in one simulation: estimated beta values averaged within the sampling algorithm
+  ValSim <-  read.table(file = paste0(datLoc, 'leverage_beta_vector_simID_', i, '_SCEN_', SCEN, '.txt'),
+                        col.names = S3_colnames, header = TRUE) %>% tbl_df()  %>%
+        group_by(K, nRSloops) %>% summarise_all(mean) %>%
+        mutate(sim = i)
+   if(class(ValSim)[1] == "try-error"){
+    print(i);next
+  }
+  
+  # Add to data frame with all simulations
+  valuesAllSim <- bind_rows(valuesAllSim, ValSim)
+}
+```
+
+Same for computational time:
+```{r "load-time-model-3", results = 'hide', cache = TRUE}
+# load in computational time
+for(i in 1:nsim){
+  if(i %in% progress) print(paste0("At ", i/nsim*100, "%"))
+  # Values in one simulation: computational time 
+  TimeSim <-  read.table(file = paste0(datLoc, 'leverage_time_vector_simID_', i, '_SCEN_', SCEN, '.txt'),
+              col.names = c("minutes"), header = TRUE) %>% tbl_df() %>%
+              bind_cols(., pairs) %>% 
+              mutate(sim = i)
+  
+  # Add to data frame with all simulations
+  timeAllSim <- bind_rows(timeAllSim, TimeSim)
+}
+```
+
+##### Bias vs computational time
+
+Quick summary:
+```{r collapse = TRUE}
+group_by(valuesAllSim, K, nRSloops) %>% summarise(avBeta = mean(beta.X_smartph_hrs)) %>% summary()
+```
+
+Plotting the estimated $\beta$ parameters for each simulation through facetting on the number of iterations (**B**).
+
+
+```{r "plot-beta-model-3", echo=FALSE, fig.align="center"}
+ggplot(valuesAllSim, aes(x = K, y = beta.X_smartph_hrs)) + 
+  geom_point(size = 0.7, colour = "#67a9cf") + 
+  facet_grid(. ~ factor(nRSloops)) +
+  scale_x_continuous(name = "Number of samples (K) in one iteration",
+                     breaks = seq(min(pairs$K), max(pairs$K),length.out = 4)) +
+  scale_y_continuous(name = expression(hat(beta))) +
+  geom_line(data = mutate(.data = valuesAllSim, TrueValue = trueBeta, Label = "True Value of Beta"),
+             aes(y = TrueValue, linetype = Label), size = 0.7, show.legend = TRUE) +
+  scale_linetype_discrete(name = "") +
+  ggtitle("Estimated beta parameter given the number of iterations (B)") +
+  theme_minimal() +
+  theme(axis.text.x=element_text(angle = -75, hjust = 0),
+        legend.position = "bottom")
+```
+
+```{r "calculate-MSE-model-3"}
+MSEtable_tmp <- group_by(valuesAllSim, K, nRSloops) %>% mutate(SE = (beta.X_smartph_hrs - trueBeta)^2) %>%
+  summarise(MSE = mean(SE, na.rm = TRUE))
+MSEtable <- matrix(MSEtable_tmp$MSE, ncol = length(nRSloops_vec), byrow = TRUE)
+colnames(MSEtable) <- paste('B = ', nRSloops_vec, sep = '')
+rownames(MSEtable) <- paste('K = ', K_vec, sep = '')
+options( scipen = 6 )
+knitr::kable(MSEtable)
+```
+
+
+Plotting the computational time.
+
+```{r "plot-time-model-3", echo=FALSE, fig.align="center"}
+TimeToPlot <- timeAllSim %>% group_by(B,K) %>% summarise(AvgMin = mean(minutes))
+  TimeToPlot$B <- factor(TimeToPlot$B)
+  TimeToPlot$K <- factor(TimeToPlot$K)
+
+ggplot(data = TimeToPlot, aes(x = K, y = AvgMin, group = B)) + 
+  geom_line(aes(colour = B),size = 1) +
+  scale_y_continuous(name = "Minutes",
+                     limits = c(0,max(TimeToPlot$AvgMin) + 2)) + 
+  scale_x_discrete(name = "Number of samples (K) in one iteration") +
+  scale_color_brewer(name = "Number of \niterations (B)",
+                     type = "diverging", palette = "RdYlBu") +
+  guides(colour = guide_legend(override.aes = list(size=2))) + 
+  ggtitle("Average computational time to estimate PIM on HPC") +
+  theme_minimal()
+```
+
+##### Distribution of estimator
+
+```{r "QQplot-model-3", fig.show='hold', fig.width=10}
+for(j in 1:length(nRSloops_vec)){
+  K_temp <- K_vec[j]
+  B_temp <- nRSloops_vec[j]
+  assign(paste0("Plot", j),
+    valuesAllSim %>% filter(K == K_temp & nRSloops == B_temp) %>% 
+    select(beta.X_smartph_hrs) %>% unlist(.) %>% 
+    as.numeric() %>% gg_qq(x = ., title = paste0('K = ', K_temp, ' and B = ', B_temp))
+  )
+}
+
+cowplot::plot_grid(Plot1, Plot2, Plot3, Plot4, Plot5, Plot6, labels = c("A", "B", "C", "D", "E", "F"), ncol = 3)
+cowplot::plot_grid(Plot7, Plot8, Plot9, Plot10, labels = c("G", "H", "I", "J"), ncol = 3)
+```
+
+##### Emperical CI coverage
+
+###### Bootstrap m-out-of n
+
+Scale the CI according to bootstrap m-out-of n theory.
+
+```{r "calculate-m-out-of-n-CI-model-3", cache = TRUE}
+scaledSD <- data.frame() %>% tbl_df()
+# Read in data (again, sigh)
+for(i in 1:nsim){
+  ValSim <- read.table(file = paste0(datLoc, 'leverage_beta_vector_simID_', i, '_SCEN_', SCEN, '.txt'),
+         col.names = S3_colnames, header = TRUE) %>% 
+        tbl_df()
+  ValSim <- rename(ValSim, beta = beta.X_smartph_hrs)
+  # CI using SD of beta with scaling
+  sdScale_tmp <- ValSim %>% group_by(K, nRSloops, TrueBeta) %>% 
+          summarise(AvgBeta = mean(beta, na.rm = TRUE),  
+                    sdBeta = sd(beta, na.rm = TRUE)) %>%
+          mutate(CIlow =  AvgBeta - (qnorm(0.025, lower.tail = FALSE) * sdBeta * sqrt(K/n)),
+              CIup = AvgBeta + (qnorm(0.025, lower.tail = FALSE) * sdBeta * sqrt(K/n)),
+              type = 'scaledSD') %>% 
+          ungroup() %>% rowwise() %>% 
+          mutate(coverage_ind = ifelse(TrueBeta >= CIlow && TrueBeta <= CIup, 1, 0),
+              sim = i)
+  
+  # Collect the values over all simulations
+  scaledSD <- bind_rows(scaledSD,sdScale_tmp)
+}
+```
+
+
+```{r "plot-CI-model-3", echo = FALSE, fig.align = 'center', fig.width = 5, fig.height=6}
+ToPlotCI <- scaledSD %>%  filter(K %in% c(230, 1000) & nRSloops %in% c(230, 1000)) %>% 
+  group_by(K, nRSloops) %>%
+  slice(seq(1, nsim, length.out = 100)) %>% ungroup()
+ToPlotCI$K <- factor(ToPlotCI$K, levels = c(230, 1000), labels = c('K = 230', 'K = 1000'))
+ToPlotCI$nRSloops <- factor(ToPlotCI$nRSloops, levels = c(230, 1000), labels = c('B = 230', 'B = 1000'))
+
+ggplot(ToPlotCI, aes(x = TrueBeta)) + geom_vline(aes(xintercept = TrueBeta), size = .8, alpha = .8) +
+   geom_point(aes(x = AvgBeta, y = sim, colour = factor(coverage_ind)), size = 0.5) + 
+   geom_segment(aes(x = CIlow, xend = CIup, y = sim, yend = sim, colour = factor(coverage_ind), alpha = factor(coverage_ind)), size = 0.9) + 
+  facet_wrap(K ~ nRSloops, dir = 'v') +
+  scale_alpha_manual("Contains true value", values = c(1,0.8), labels = c("NO", "YES")) +
+  scale_colour_manual("Contains true value", values = c('#d95f02', '#1b9e77'), labels = c("NO", "YES")) +
+   scale_x_continuous("beta") + scale_y_continuous("simulation") +
+  theme(legend.position="bottom") +
+   ggtitle("100 random selected simulations with the 95% CI")
+```
+
+```{r "table-scaled-sd-model-3", cache.rebuild = TRUE}
+scaledSDTable_tmp <- scaledSD %>% group_by(K,nRSloops) %>% summarise(EC = mean(coverage_ind))
+scaledSDTable <- matrix(scaledSDTable_tmp$EC, ncol = length(nRSloops_vec), byrow = TRUE)
+colnames(scaledSDTable) <- paste('B = ', nRSloops_vec, sep = '')
+rownames(scaledSDTable) <- paste('K = ', K_vec, sep = '')
+knitr::kable(scaledSDTable)
+```
+
+
+---------------------------------------------------------------------------------------------------------------
+
+## Optimal Subsampling with replacement
+
+### Simulations
+
+```{r "simulation parameters-replacement", echo = FALSE}
+# location of data
+if(MACHINE == "MAC"){
+datLoc <- "/Volumes/1_5_TB_Han_HDD/Mastat/Thesis/BigDataPIM/Leverage/Replace/"  
+}
+if(MACHINE == "DOS"){
+datLoc <- ""  
+}
+
+# number of simulations 
+nsim <- 1000
+
+# Confidence level (for CI section)
+level <- 0.95
+
+# Sample size
+n <- 250000
+
+# Vector of number of resampling loops
+nRSloops_vec <- floor(seq(10,1000,length.out = 10))[1:3]
+
+# Vector of number of selected datapoints K per iteraton 
+K_vec <- floor(seq(10,1000,length.out = 10))[1:3]
+
+# Number of pairs/combinations between number of resampling loops and sampled data 
+pairs <- expand.grid(B = nRSloops_vec, K = K_vec)
+```
+
+### Results
+
+#### Model 1
+
+Parameters:
+```{r "model-1-parameters-replacement", cache.rebuild = TRUE}
+u <- 1
+alpha <- 5
+sigma <- 1
+trueBeta <- alpha/(sqrt(2) * sigma)
+# Model (called SCEN in script)
+SCEN <- 1
+```
+
+##### Load in data
+
+Start with estimated $\beta$:
+```{r echo = FALSE}
+# Data frame with all values over 1000 simulations
+valuesAllSim <- timeAllSim <- data.frame() %>% tbl_df()
+
+# Progress
+progress <- floor(seq(1,nsim,length.out = 11)[-1])
+```
+
+
+```{r "load-beta-model-1-replacement", results = 'hide', cache = TRUE}
+# load in estimated beta values
+for(i in 1:nsim){
+  if(i %in% progress) print(paste0("At ", i/nsim*100, "%"))
+  # Values in one simulation: estimated beta values averaged within the sampling algorithm
+  ValSim <-  read.table(file = paste0(datLoc, 'leverage_beta_vector_simID_', i, '_SCEN_', SCEN, '.txt'),
+                        col.names = c("beta", "sVariance", "K", "nRSloops", "TrueBeta"), 
+                        header = TRUE) %>% tbl_df()  %>%
+        group_by(K, nRSloops) %>% summarise_all(mean) %>%
+        mutate(sim = i)
+   if(class(ValSim)[1] == "try-error"){
+    print(i);next
+  }
+  
+  # Add to data frame with all simulations
+  valuesAllSim <- bind_rows(valuesAllSim, ValSim)
+}
+```
+
+Same for computational time:
+```{r "load-time-model-1-replacement", results = 'hide', cache = TRUE}
+# load in computational time
+for(i in 1:nsim){
+  if(i %in% progress) print(paste0("At ", i/nsim*100, "%"))
+  # Values in one simulation: computational time 
+  TimeSim <-  read.table(file = paste0(datLoc, 'leverage_time_vector_simID_', i, '_SCEN_', SCEN, '.txt'),
+              col.names = c("minutes"), header = TRUE) %>% tbl_df() %>%
+              bind_cols(., pairs) %>% 
+              mutate(sim = i)
+  
+  # Add to data frame with all simulations
+  timeAllSim <- bind_rows(timeAllSim, TimeSim)
+}
+```
+
+##### Bias vs computational time
+
+Quick summary:
+```{r collapse = TRUE}
+group_by(valuesAllSim, K, nRSloops) %>% summarise(avBeta = mean(beta)) %>% summary()
+```
+
+Plotting the estimated $\beta$ parameters for each simulation through facetting on the number of iterations (**B**).
+
+
+```{r "plot-beta-model-1-replacement", echo=FALSE, fig.align="center"}
+ggplot(valuesAllSim, aes(x = K, y = beta)) + 
+  geom_point(size = 0.7, colour = "#67a9cf") + 
+  facet_grid(. ~ factor(nRSloops)) +
+  scale_x_continuous(name = "Number of samples (K) in one iteration",
+                     breaks = unique(pairs$K)) +
+                     #breaks = seq(min(pairs$K), max(pairs$K),length.out = 4)) +
+  scale_y_continuous(name = expression(hat(beta))) +
+  geom_line(data = mutate(.data = valuesAllSim, TrueValue = trueBeta, Label = "True Value of Beta"),
+             aes(y = TrueValue, linetype = Label), size = 0.7, show.legend = TRUE) +
+  scale_linetype_discrete(name = "") +
+  ggtitle("Estimated beta parameter given the number of iterations (B)") +
+  theme_minimal() +
+  theme(axis.text.x=element_text(angle = -75, hjust = 0),
+        legend.position = "bottom")
+```
+
+```{r "calculate-MSE-model-1-replacement"}
+MSEtable_tmp <- group_by(valuesAllSim, K, nRSloops) %>% mutate(SE = (beta - trueBeta)^2) %>%
+  summarise(MSE = mean(SE, na.rm = TRUE))
+MSEtable <- matrix(MSEtable_tmp$MSE, ncol = length(nRSloops_vec), byrow = TRUE)
+colnames(MSEtable) <- paste('B = ', nRSloops_vec, sep = '')
+rownames(MSEtable) <- paste('K = ', K_vec, sep = '')
+options( scipen = 6 )
+knitr::kable(MSEtable)
+```
+
+
+Plotting the computational time.
+
+```{r "plot-time-model-1-replacement", echo=FALSE, fig.align="center"}
+TimeToPlot <- timeAllSim %>% group_by(B,K) %>% summarise(AvgMin = mean(minutes))
+  TimeToPlot$B <- factor(TimeToPlot$B)
+  TimeToPlot$K <- factor(TimeToPlot$K)
+
+ggplot(data = TimeToPlot, aes(x = K, y = AvgMin, group = B)) + 
+  geom_line(aes(colour = B),size = 1) +
+  scale_y_continuous(name = "Minutes",
+                     limits = c(0,max(TimeToPlot$AvgMin) + 2)) + 
+  scale_x_discrete(name = "Number of samples (K) in one iteration") +
+  scale_color_brewer(name = "Number of \niterations (B)",
+                     type = "diverging", palette = "RdYlBu") +
+  guides(colour = guide_legend(override.aes = list(size=2))) + 
+  ggtitle("Average computational time to estimate PIM on HPC") +
+  theme_minimal()
+```
+
+##### Distribution of estimator
+
+```{r "QQplot-model-1-replacement", fig.show='hold', fig.width=10}
+for(j in 1:length(nRSloops_vec)){
+  K_temp <- K_vec[j]
+  B_temp <- nRSloops_vec[j]
+  assign(paste0("Plot", j),
+    valuesAllSim %>% filter(K == K_temp & nRSloops == B_temp) %>% 
+    select(beta) %>% unlist(.) %>% 
+    as.numeric() %>% gg_qq(x = ., title = paste0('K = ', K_temp, ' and B = ', B_temp))
+  )
+}
+
+#cowplot::plot_grid(Plot1, Plot2, Plot3, Plot4, Plot5, Plot6, labels = c("A", "B", "C", "D", "E", "F"), ncol = 3)
+#cowplot::plot_grid(Plot7, Plot8, Plot9, Plot10, labels = c("G", "H", "I", "J"), ncol = 3)
+cowplot::plot_grid(Plot1, Plot2, Plot3, labels = c("A", "B", "C"), ncol = 3)
+```
+
+##### Emperical CI coverage
+
+###### Bootstrap m-out-of n
+
+Scale the CI according to bootstrap m-out-of n theory.
+
+```{r "calculate-m-out-of-n-CI-model-1-replacement", cache = TRUE}
+scaledSD <- data.frame() %>% tbl_df()
+# Read in data (again, sigh)
+for(i in 1:nsim){
+  ValSim <- read.table(file = paste0(datLoc, 'leverage_beta_vector_simID_', i, '_SCEN_', SCEN, '.txt'),
+         col.names = c("beta", "sVariance", "K", "nRSloops", "TrueBeta"),
+         header = TRUE) %>% tbl_df()
+  # CI using SD of beta with scaling
+  sdScale_tmp <- ValSim %>% group_by(K, nRSloops, TrueBeta) %>% 
+          summarise(AvgBeta = mean(beta, na.rm = TRUE),  
+                    sdBeta = sd(beta, na.rm = TRUE)) %>%
+          mutate(CIlow =  AvgBeta - (qnorm(0.025, lower.tail = FALSE) * sdBeta * sqrt(K/n)),
+              CIup = AvgBeta + (qnorm(0.025, lower.tail = FALSE) * sdBeta * sqrt(K/n)),
+              type = 'scaledSD') %>% 
+          ungroup() %>% rowwise() %>% 
+          mutate(coverage_ind = ifelse(TrueBeta >= CIlow && TrueBeta <= CIup, 1, 0),
+              sim = i)
+  
+  # Collect the values over all simulations
+  scaledSD <- bind_rows(scaledSD,sdScale_tmp)
+}
+```
+
+
+```{r "plot-CI-model-1-replacement", echo = FALSE, fig.align = 'center', fig.width = 5, fig.height=6, cache.rebuild = TRUE}
+ToPlotCI <- scaledSD %>% group_by(K, nRSloops) %>% 
+  filter(K %in% c(120, 230) & nRSloops %in% c(120, 230)) %>% 
+  slice(seq(1, nsim, length.out = 100)) %>% ungroup()
+ToPlotCI$K <- factor(ToPlotCI$K, levels = c(120, 230), labels = c('K = 120', 'K = 230'))
+ToPlotCI$nRSloops <- factor(ToPlotCI$nRSloops, levels = c(120, 230), labels = c('B = 120', 'B = 230'))
+
+ggplot(ToPlotCI, aes(x = TrueBeta)) + geom_vline(aes(xintercept = TrueBeta), size = .8, alpha = .8) +
+   geom_point(aes(x = AvgBeta, y = sim, colour = factor(coverage_ind)), size = 0.5) + 
+   geom_segment(aes(x = CIlow, xend = CIup, y = sim, yend = sim, colour = factor(coverage_ind)), size = 0.9) + 
+  facet_wrap(K ~ nRSloops, dir = 'v') +
+  scale_alpha_manual("Contains true value", values = c(1,0.8), labels = c("NO", "YES")) +
+  scale_colour_manual("Contains true value", values = c('#d95f02', '#1b9e77'), labels = c("NO", "YES")) +
+   scale_x_continuous("beta") + scale_y_continuous("simulation") +
+  theme(legend.position="bottom") +
+   ggtitle("100 random selected simulations with the 95% CI")
+```
+
+```{r "table-scaled-sd-model-1-replacement", cache.rebuild = TRUE}
+scaledSDTable_tmp <- scaledSD %>% group_by(K,nRSloops) %>% summarise(EC = mean(coverage_ind))
+scaledSDTable <- matrix(scaledSDTable_tmp$EC, ncol = length(nRSloops_vec), byrow = TRUE)
+colnames(scaledSDTable) <- paste('B = ', nRSloops_vec, sep = '')
+rownames(scaledSDTable) <- paste('K = ', K_vec, sep = '')
+knitr::kable(scaledSDTable)
+```
+
+
+#### Model 2 (3)
+
+Parameters:
+
+```{r "model-3-parameters-replacement", cache.rebuild = TRUE}
+alpha_1 <- -0.43
+# Sigma based on dataset
+sigma <- 9.51
+trueBeta <- alpha_1/(sqrt(2) * sigma)
+# Model (called SCEN in script)
+SCEN <- 3
+```
+
+
+
+## Optimal Subsampling with replacement - Weighted Estimator
+
+### Simulations
+
+```{r "simulation parameters-weighted", echo = FALSE}
+# location of data
+if(MACHINE == "MAC"){
+datLoc <- "/Volumes/1_5_TB_Han_HDD/Mastat/Thesis/BigDataPIM/WeightedLeverage/"  
+}
+if(MACHINE == "DOS"){
+datLoc <- ""  
+}
+
+# number of simulations 
+nsim <- 1000
+
+# Confidence level (for CI section)
+level <- 0.95
+
+# Sample size
+n <- 250000
+
+# Vector of number of resampling loops
+nRSloops_vec <- floor(seq(10,1000,length.out = 10))
+nRSloops_vec <- nRSloops_vec[2:3]
+
+# Vector of number of selected datapoints K per iteraton 
+K_vec <- floor(seq(10,1000,length.out = 10))
+K_vec <- K_vec[2:3]
+
+# Number of pairs/combinations between number of resampling loops and sampled data 
+pairs <- expand.grid(B = nRSloops_vec, K = K_vec)
+```
+
+### Results
+
+#### Model 1
+
+Parameters:
+```{r "model-1-parameters-no-replacement-weighted", cache.rebuild = TRUE}
+u <- 1
+alpha <- 5
+sigma <- 1
+trueBeta <- alpha/(sqrt(2) * sigma)
+# Model (called SCEN in script)
+SCEN <- 1
+```
+
+##### Load in data
+
+Start with estimated $\beta$:
+```{r echo = FALSE}
+# Data frame with all values over 1000 simulations
+valuesAllSim <- timeAllSim <- data.frame() %>% tbl_df()
+
+# Progress
+progress <- floor(seq(1,nsim,length.out = 11)[-1])
+```
+
+
+```{r "load-beta-model-1-weighted", results = 'hide', cache = TRUE}
+# load in estimated beta values
+for(i in 1:nsim){
+  if(i %in% progress) print(paste0("At ", i/nsim*100, "%"))
+  # Values in one simulation: estimated beta values averaged within the sampling algorithm
+  ValSim <-  read.table(file = paste0(datLoc, 'weighted_leverage_beta_vector_simID_', i, '_SCEN_', SCEN, '.txt'),
+                        col.names = c("beta", "K", "nRSloops", "TrueBeta"),
+                        header = TRUE) %>% tbl_df()  %>%
+        group_by(K, nRSloops) %>% summarise(avBeta = mean(beta)) %>%
+        mutate(sim = i)
+   if(class(ValSim)[1] == "try-error"){
+    print(i);next
+  }
+  
+  # Add to data frame with all simulations
+  valuesAllSim <- bind_rows(valuesAllSim, ValSim)
+}
+```
+
+Same for computational time:
+```{r "load-time-model-1-weighted", results = 'hide', cache = TRUE}
+# load in computational time
+for(i in 1:nsim){
+  if(i %in% progress) print(paste0("At ", i/nsim*100, "%"))
+  # Values in one simulation: computational time 
+  TimeSim <-  read.table(file = paste0(datLoc, 'weighted_leverage_time_vector_simID_', i, '_SCEN_', SCEN, '.txt'),
+              col.names = c("minutes"), header = TRUE) %>% tbl_df() %>%
+              bind_cols(., pairs) %>% 
+              mutate(sim = i)
+  
+  # Add to data frame with all simulations
+  timeAllSim <- bind_rows(timeAllSim, TimeSim)
+}
+```
+
+##### Bias vs computational time
+
+Quick summary:
+```{r collapse = TRUE}
+group_by(valuesAllSim, K, nRSloops) %>% summarise(avBeta = mean(avBeta)) %>% summary()
+```
+
+Plotting the estimated $\beta$ parameters for each simulation through facetting on the number of iterations (**B**).
+
+
+```{r "plot-beta-model-1-weighted", echo=FALSE, fig.align="center"}
+ggplot(valuesAllSim, aes(x = K, y = avBeta)) + 
+  geom_point(size = 0.7, colour = "#67a9cf") + 
+  facet_grid(. ~ factor(nRSloops)) +
+  scale_x_continuous(name = "Number of samples (K) in one iteration",
+                     breaks = seq(min(pairs$K), max(pairs$K),length.out = 4)) +
+  scale_y_continuous(name = expression(hat(beta))) +
+  geom_line(data = mutate(.data = valuesAllSim, TrueValue = trueBeta, Label = "True Value of Beta"),
+             aes(y = TrueValue, linetype = Label), size = 0.7, show.legend = TRUE) +
+  scale_linetype_discrete(name = "") +
+  ggtitle("Estimated beta parameter given the number of iterations (B)") +
+  theme_minimal() +
+  theme(axis.text.x=element_text(angle = -75, hjust = 0),
+        legend.position = "bottom")
+```
+
+```{r "calculate-MSE-model-1-weighted"}
+MSEtable_tmp <- group_by(valuesAllSim, K, nRSloops) %>% mutate(SE = (avBeta - trueBeta)^2) %>%
+  summarise(MSE = mean(SE, na.rm = TRUE))
+MSEtable <- matrix(MSEtable_tmp$MSE, ncol = length(nRSloops_vec), byrow = TRUE)
+colnames(MSEtable) <- paste('B = ', nRSloops_vec, sep = '')
+rownames(MSEtable) <- paste('K = ', K_vec, sep = '')
+options( scipen = 6 )
+knitr::kable(MSEtable)
+```
+
+
+Plotting the computational time.
+
+```{r "plot-time-model-1-weighted", echo=FALSE, fig.align="center"}
+TimeToPlot <- timeAllSim %>% group_by(B,K) %>% summarise(AvgMin = mean(minutes))
+  TimeToPlot$B <- factor(TimeToPlot$B)
+  TimeToPlot$K <- factor(TimeToPlot$K)
+
+ggplot(data = TimeToPlot, aes(x = K, y = AvgMin, group = B)) + 
+  geom_line(aes(colour = B),size = 1) +
+  scale_y_continuous(name = "Minutes",
+                     limits = c(0,max(TimeToPlot$AvgMin) + 2)) + 
+  scale_x_discrete(name = "Number of samples (K) in one iteration") +
+  scale_color_brewer(name = "Number of \niterations (B)",
+                     type = "diverging", palette = "RdYlBu") +
+  guides(colour = guide_legend(override.aes = list(size=2))) + 
+  ggtitle("Average computational time to estimate PIM on HPC") +
+  theme_minimal()
+```
+
+##### Distribution of estimator
+
+```{r "QQplot-model-1-weighted", fig.show='hold', fig.width=10}
+for(j in 1:length(nRSloops_vec)){
+  K_temp <- K_vec[j]
+  B_temp <- nRSloops_vec[j]
+  assign(paste0("Plot", j),
+    valuesAllSim %>% filter(K == K_temp & nRSloops == B_temp) %>% 
+    select(avBeta) %>% unlist(.) %>% 
+    as.numeric() %>% gg_qq(x = ., title = paste0('K = ', K_temp, ' and B = ', B_temp))
+  )
+}
+
+cowplot::plot_grid(Plot1, Plot2, labels = c("A", "B"), ncol = 2)
+#cowplot::plot_grid(Plot7, Plot8, Plot9, Plot10, labels = c("G", "H", "I", "J"), ncol = 3)
+```
+
+##### Emperical CI coverage
+
+###### Bootstrap m-out-of n
+
+Scale the CI according to bootstrap m-out-of n theory.
+
+```{r "calculate-m-out-of-n-CI-model-1-weighted", cache = TRUE}
+scaledSD <- data.frame() %>% tbl_df()
+# Read in data (again, sigh)
+for(i in 1:nsim){
+  ValSim <- read.table(file = paste0(datLoc, 'weighted_leverage_beta_vector_simID_', i, '_SCEN_', SCEN, '.txt'),
+         col.names = c("beta", "K", "nRSloops", "TrueBeta"),
+         header = TRUE) %>% 
+        tbl_df()
+  # CI using SD of beta with scaling
+  sdScale_tmp <- ValSim %>% group_by(K, nRSloops, TrueBeta) %>% 
+          summarise(AvgBeta = mean(beta, na.rm = TRUE),  
+                    sdBeta = sd(beta, na.rm = TRUE)) %>%
+          mutate(CIlow =  AvgBeta - (qnorm(0.025, lower.tail = FALSE) * sdBeta * sqrt(K/n)),
+              CIup = AvgBeta + (qnorm(0.025, lower.tail = FALSE) * sdBeta * sqrt(K/n)),
+              type = 'scaledSD') %>% 
+          ungroup() %>% rowwise() %>% 
+          mutate(coverage_ind = ifelse(TrueBeta >= CIlow && TrueBeta <= CIup, 1, 0),
+              sim = i)
+  
+  # Collect the values over all simulations
+  scaledSD <- bind_rows(scaledSD,sdScale_tmp)
+}
+```
+
+
+```{r "plot-CI-model-1-weighted", echo = FALSE, fig.align = 'center', fig.width = 5, fig.height=6}
+ToPlotCI <- scaledSD %>%  group_by(K, nRSloops) %>%
+  slice(seq(1, nsim, length.out = 100)) %>% ungroup()
+ToPlotCI$K <- factor(ToPlotCI$K, levels = c(120, 230), labels = c('K = 120', 'K = 230'))
+ToPlotCI$nRSloops <- factor(ToPlotCI$nRSloops, levels = c(120, 230), labels = c('B = 120', 'B = 230'))
+
+ggplot(ToPlotCI, aes(x = TrueBeta)) + geom_vline(aes(xintercept = TrueBeta), size = .8, alpha = .8) +
+   geom_point(aes(x = AvgBeta, y = sim, colour = factor(coverage_ind)), size = 0.5) + 
+   geom_segment(aes(x = CIlow, xend = CIup, y = sim, yend = sim, colour = factor(coverage_ind), alpha = factor(coverage_ind)), size = 0.9) + 
+  facet_wrap(K ~ nRSloops, dir = 'v') +
+  scale_alpha_manual("Contains true value", values = c(1,0.8), labels = c("NO", "YES")) +
+  scale_colour_manual("Contains true value", values = c('#d95f02', '#1b9e77'), labels = c("NO", "YES")) +
+   scale_x_continuous("beta") + scale_y_continuous("simulation") +
+  theme(legend.position="bottom") +
+   ggtitle("100 random selected simulations with the 95% CI")
+```
+
+```{r "table-scaled-sd-model-1-weighted", cache.rebuild = TRUE}
+scaledSDTable_tmp <- scaledSD %>% group_by(K,nRSloops) %>% summarise(EC = mean(coverage_ind))
+scaledSDTable <- matrix(scaledSDTable_tmp$EC, ncol = length(nRSloops_vec), byrow = TRUE)
+colnames(scaledSDTable) <- paste('B = ', nRSloops_vec, sep = '')
+rownames(scaledSDTable) <- paste('K = ', K_vec, sep = '')
+knitr::kable(scaledSDTable)
+```
+
+#### Model 2 (3)
+
+
