@@ -28,9 +28,11 @@ In our setting, we do not need a massive dataset as it is already nearly imposib
 
 ## Project structure
 * 1_Scripts: contains **R** scripts.
-* 2_Reports: contains a selection of reports (in the form of R notebooks using RStudio/Jupyter).
+* 2_Reports: contains most reports. Some reports are **R** notebooks which render in Github. For **html** reports, you need to download the entire repository.
 
-
+## Application: mental well-being
+Analyses for chapter of application can be found under: 
+[2_Reports/Application](https://github.com/HBossier/BigDataPIM/tree/master/2_Reports/Application)
 
 # References
 [[1]](http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.448.9892&rep=rep1&type=pdf) Thas, O., De Neve, J., Clement, L., and Ottoy, J.P. (2012) Probabilistic index models (with discussion). *Journal of the Royal Statistical Society* - Series B, 74:623-671.
