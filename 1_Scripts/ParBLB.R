@@ -1,6 +1,6 @@
 ####################
-#### TITLE:     Run resampling scheme for large N: bag of little m out of n bootstraps
-#### Contents:  
+#### TITLE:     Run resampling scheme for large N: single data partitioning
+#### Contents:
 ####
 #### Source Files: //Mastat/Thesis
 #### First Modified: 04/06/2017
@@ -14,9 +14,9 @@
 ##########
 ##
 
-# In this script, we run the bag of little m out of n bootstraps (BLmnB) algorithm on large PIM datasets
-# Crucially: data has been split up in different parts.
-
+# In this script, we run the single data partitioning algorithm on large PIM datasets
+# Crucially: data has been split up in different parts (see script BLB.R).
+# I use bags as synonyms for partitions in this scripts.
 
 ##
 ##########
@@ -152,17 +152,17 @@ for(s in Sbags){
         }else{
           # Names of the objects
           namesObject <- broom::tidy(PIMfit@coef) %>% data.table::transpose() %>% slice(.,1)
-          
+
           # Save beta value if no error.
           PIMvalues <- broom::tidy(PIMfit@coef) %>% data.table::transpose() %>% slice(.,2)
           names(PIMvalues) <- namesObject
-          
+
           # Save sandwich variance estimator (only variance on diagonal)
           PIMvariances <- broom::tidy(diag(PIMfit@vcov)) %>% data.table::transpose() %>% slice(2)
           names(PIMvariances) <- namesObject
         }
       }
-      
+
       # Collect estimated beta values and variance with info about simulation and bag
       BetaValues <- data.frame(beta = PIMvalues,
                                sVariance = PIMvariances,
@@ -170,10 +170,8 @@ for(s in Sbags){
                                Sim = SIMID,
                                TrueBeta = trueBeta)
       # Write results with simulation and bag
-      write.table(BetaValues, file = paste(ResultsDir,'/SCEN_', SCEN, '/', SIMID, '/BLB_beta_SCEN_', SCEN ,'_simID_', SIMID, '_bagID_', BAGID, '.txt', sep = ''), 
+      write.table(BetaValues, file = paste(ResultsDir,'/SCEN_', SCEN, '/', SIMID, '/BLB_beta_SCEN_', SCEN ,'_simID_', SIMID, '_bagID_', BAGID, '.txt', sep = ''),
                   row.names = FALSE, col.names = TRUE, append = TRUE)
     }
   }
 }
-
-

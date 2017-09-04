@@ -1,6 +1,6 @@
 ####################
-#### TITLE:     Run resampling scheme for large N: bag of little m out of n bootstraps
-#### Contents:  
+#### TITLE:     Prepare single data partitioning algorithm
+#### Contents:
 ####
 #### Source Files: //Mastat/Thesis
 #### First Modified: 04/06/2017
@@ -14,7 +14,10 @@
 ##########
 ##
 
-# In this script, we run the bag of little m out of n bootstraps (BLmnB) algorithm on large PIM datasets
+# In this script, we partition the data so that we can run the single
+# data partition algorithm.
+# Note: in script, I use bag and partition as synonyms. 
+
 
 
 ##
@@ -46,7 +49,7 @@ SCEN <- 4
 # Seed
 StartingSeed <- 11 * SCEN
 
-# Global variables: univariate simple linear regression 
+# Global variables: univariate simple linear regression
 n <- 250000
 
 # Depending on scenario, different parameter values
@@ -94,10 +97,10 @@ if(SCEN == 4){
 if(SCEN %in% c(1,2,4)){
   # Generate predictor
   X <- runif(n = n, min = 0.1, max = u)
-  
+
   # Generate data
   Y <- alpha*X + rnorm(n = n, mean = 0, sd = sigma)
-  
+
   # In data frame
   OrigData <- data.frame(Y = Y, X = X)
 }
@@ -107,12 +110,12 @@ if(SCEN == 3){
   X_sex <- sample(x = sex, size = n, replace = TRUE, prob = c(1-0.4758, 0.4758))
   X_econArea <- sample(x = econArea, size = n, replace = TRUE, prob = c(1-0.4348, 0.4348))
   X_ethnic <- sample(x = ethnic, size = n, replace = TRUE, prob = c(1-0.2408, 0.2408))
-  
+
   # Observed data
   Y <- alpha_0 + alpha_1*X_smartph_hrs + alpha_sex*X_sex +
     alphaEcon*X_econArea + alpha_ethnic*X_ethnic +
     rnorm(n = n, mean = 0, sd = sigma)
-  
+
   # Data frame
   OrigData <- data.frame(Y = Y, X_smartph_hrs, X_sex, X_econArea, X_ethnic)
 }
@@ -129,9 +132,9 @@ if(SCEN == 1){
   print('Development only for model 1')
   if(isTRUE(DEVELOPMENT)){
     # Step 1: create S disjoint subsets of size b from original data frame
-    # Number of bootstraps per bag
+    # Number of bootstraps per partition
     boots <- 50
-    # Max size of the bags
+    # Max size of the partitions
     bootCutOff <- 500
     S <- 1
     sizeB <- dim(OrigData)[1]
@@ -140,9 +143,9 @@ if(SCEN == 1){
       sizeB <- dim(OrigData)[1] / S
       S <- S + 1
     }
-    
+
     # Slow approach: single core operations
-    # Step 2: loop over the subsets (the bags)
+    # Step 2: loop over the subsets (the partitions)
     bag_estimate <- c()
     for(i in 1:S){
       print(i)
@@ -153,8 +156,8 @@ if(SCEN == 1){
       bootstrap_est <- c()
       for(k in 1:boots){
         bootsample <- sample_n(tbl = subsetData, size = sizeB, replace = TRUE)
-        # Try to fit PIM. If fails, return message. 
-        value <- try(pim(formula = Y ~ X, data = bootsample, 
+        # Try to fit PIM. If fails, return message.
+        value <- try(pim(formula = Y ~ X, data = bootsample,
                          link = 'probit', model = 'difference')@coef, silent = TRUE)
         if(class(value) == 'try-error'){
           print(paste0('Error in bag ',i, '. Bootstrap ',k,'. Message = ', attr(value,"condition")))
@@ -167,9 +170,9 @@ if(SCEN == 1){
       bag_estimate_tmp <- mean(bootstrap_est)
       bag_estimate <- c(bag_estimate, bag_estimate_tmp)
     }
-    
-    
-    
+
+
+
     # Faster approach: parallel, using as many cores as possible
     # Step 2: loop over the subsets (the bags)
     # First define a function
@@ -181,8 +184,8 @@ if(SCEN == 1){
       bootstrap_est <- c()
       for(k in 1:boots){
         bootsample <- sample_n(tbl = subsetData, size = sizeB, replace = TRUE)
-        # Try to fit PIM. If fails, return message. 
-        value <- try(pim(formula = Y ~ X, data = bootsample, 
+        # Try to fit PIM. If fails, return message.
+        value <- try(pim(formula = Y ~ X, data = bootsample,
                          link = 'probit', model = 'difference')@coef, silent = TRUE)
         if(class(value) == 'try-error'){
           print(paste0('Error in bag ',sID, '. Bootstrap ',k,'. Message = ', attr(value,"condition")))
@@ -195,23 +198,23 @@ if(SCEN == 1){
       bag_estimate <- mean(bootstrap_est)
       return(bag_estimate)
     }
-    
+
     # Detect and start the workers
     P <- detectCores(logical = FALSE) # physical cores
     cl <- makeCluster(P)
-    
+
     # Initialize them with the OrigData and load library tidyverse
     clusterExport(cl, "OrigData")
     clusterEvalQ(cl, library(tidyverse))
     clusterEvalQ(cl, library(pim))
     clusterEvalQ(cl, library(nleqslv))
-    
+
     # Now run the BBBfunction
     bag_estimate_results <- clusterApply(cl, 1:(S-1), fun = BBBfunction, boots = boots, sizeB = sizeB)
     bag_estimate <- do.call(rbind, bag_estimate_results)
-    
+
     stopCluster(cl)
-    
+
     mean(bag_estimate, na.rm = TRUE)
   }
 }
@@ -222,21 +225,21 @@ if(SCEN == 1){
 ##########
 ##
 
-# If preparing for HPC, then start here 
+# If preparing for HPC, then start here
 if(!isTRUE(DEVELOPMENT)){
   rm(OrigData)
   # Possible to use up to 100 cores simultaneously
-    # Hence, ideally subdivide in 100 parts, each part is a bag.
-    # Number of bags (S)
+    # Hence, ideally subdivide in 100 parts, each part is a partition/bag.
+    # Number of partitions/bags (S)
   cores <- S <- 100
-  # 100 bootstraps/bag
+  # 100 bootstraps/bag: optional
   boots <- 100
-  # Max size of the bags
+  # Max size of the partitions/bags
   sizeB <- n / cores
-  
+
   # Vector of number of simulations
   nsim_vec <- 1:1000
-  
+
   # Progress
   progress <- floor(quantile(nsim_vec, probs = c(seq(0,0.9,by = .1))))
 
@@ -246,15 +249,15 @@ if(!isTRUE(DEVELOPMENT)){
     if(i %in% progress) print(paste0('At ', i/length(nsim_vec) * 100, '%'))
     # Start with creating data: same seed as non optimal resampling method
     set.seed(StartingSeed + (StartingSeed * i))
-    
+
     # Different data generating models in different scenario's
     if(SCEN %in% c(1,2,4)){
       # Generate predictor
       X <- runif(n = n, min = 0.1, max = u)
-      
+
       # Generate data
       Y <- alpha*X + rnorm(n = n, mean = 0, sd = sigma)
-      
+
       # In data frame
       OrigData <- data.frame(Y = Y, X = X)
     }
@@ -264,22 +267,22 @@ if(!isTRUE(DEVELOPMENT)){
       X_sex <- sample(x = sex, size = n, replace = TRUE, prob = c(1-0.4758, 0.4758))
       X_econArea <- sample(x = econArea, size = n, replace = TRUE, prob = c(1-0.4348, 0.4348))
       X_ethnic <- sample(x = ethnic, size = n, replace = TRUE, prob = c(1-0.2408, 0.2408))
-      
+
       # Observed data
       Y <- alpha_0 + alpha_1*X_smartph_hrs + alpha_sex*X_sex +
         alphaEcon*X_econArea + alpha_ethnic*X_ethnic +
         rnorm(n = n, mean = 0, sd = sigma)
-      
+
       # Data frame
       OrigData <- data.frame(Y = Y, X_smartph_hrs, X_sex, X_econArea, X_ethnic)
     }
-    
+
     # Now split up in S parts
     for(j in 1:S){
       start <- j + (j - 1) * sizeB
       end <- start + sizeB
       subsetData <- OrigData %>% slice(start:end)
-      write.table(x = subsetData, file = paste(DataPartition,'/SCEN_', SCEN, '/BLBdata_scen_', SCEN,'_sim_', i, '_bag_', j, '.txt', sep = ''), 
+      write.table(x = subsetData, file = paste(DataPartition,'/SCEN_', SCEN, '/BLBdata_scen_', SCEN,'_sim_', i, '_bag_', j, '.txt', sep = ''),
                   row.names = FALSE, col.names = TRUE, quote = FALSE)
     }
   }
