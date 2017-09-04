@@ -16,7 +16,6 @@
 
 # In this script, we run the bag of little m out of n bootstraps (BLmnB) algorithm on large PIM datasets
 
-# Not yet integrated within PIM package.
 
 ##
 ##########
