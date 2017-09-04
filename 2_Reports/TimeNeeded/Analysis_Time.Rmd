@@ -81,7 +81,7 @@ We execute the same code on the HPC infrastructure of UGent and iterated for $K 
 
 ```{r cache = TRUE}
 # Data directory
-dataWD <- '/Volumes/2_TB_WD_Elements_10B8_Han/PhD/BigDataPIM/TimeNeeded/output/'
+dataWD <- '/Volumes/1_5_TB_Han_HDD/Mastat/Thesis/BigDataPIM/TimeNeeded/output/'
 # Number of simulations
 nsim <- 500
 betavalues <- array(NA, dim = c(length(n), nsim))
@@ -116,7 +116,7 @@ BothMachines <- local %>% select(TimeInMin, SampleSize) %>% mutate(Machine = 'La
 BothMachines %>% 
   ggplot(., aes(x = SampleSize, y = TimeInMin, group = Machine)) +
   geom_smooth(method = "auto", aes(colour = Machine)) + geom_point(aes(colour = Machine), alpha = 0.1) +
-    scale_x_continuous(name = "Sample Size (N)") + 
+    scale_x_continuous(name = "Sample Size (n)") + 
     scale_y_continuous(name = "Time (minutes)") + 
     # Now add theme based on FiveThirtyEight
     theme_foundation(base_size = 12, base_family = "sans") + 
@@ -128,7 +128,8 @@ BothMachines %>%
             panel.grid = element_line(colour = NULL), panel.grid.major = element_line(colour = ggthemes_data$fivethirtyeight["medgray"]), 
             panel.grid.minor = element_blank(), plot.title = element_text(hjust = 0, 
                 size = rel(1.5), face = "bold"), plot.margin = unit(c(1, 
-                1, 1, 1), "lines"), strip.background = element_rect())
+                1, 1, 1), "lines"), strip.background = element_rect()) +
+      theme_bw()
 
 ```
 
