@@ -269,9 +269,9 @@ The true value for $\beta =$ ```r -0.43/(sqrt(2) * 9.51)```.
 For comparisson, we plot the distribution of mental well being in the dataset (left) and $n = 250.000$ simulated datapoints (right). 
 
 ```{r "histograms", fig.width=10, fig.align="center"}
-par(mfrow = c(1,2))
-hist(dataWB$mwbi, main = "Mental well being in Przybylski and Weinstein (2017)", xlab = "")
-hist(Y, main = "Simulated mental well being", xlab = "")
+par(mfrow = c(1,2), mar = c(4,2,1,1))
+hist(dataWB$mwbi, main = "Przybylski and Weinstein (2017)", xlab = "Mental well-being")
+hist(Y, main = "Simulated data set", xlab = "Mental well-being")
 ```
 
 ```{r echo = FALSE}
@@ -1101,6 +1101,31 @@ for(i in 1:nsim){
   
   # Collect the values over all simulations
   scaledSD <- bind_rows(scaledSD,sdScale_tmp)
+}
+```
+
+```{r "calculate-m-out-of-npairs-CI-model-1", eval = FALSE, echo = FALSE}
+scaledPairSD <- data.frame() %>% tbl_df()
+# Read in data
+for(i in 1:nsim){
+  ValSim <- read.table(file = paste0(datLoc, 'uni_beta_vector_simID_', i, '_SCEN_', SCEN, '.txt'),
+         col.names = c("beta", "sVariance", "K", "nRSloops", "TrueBeta"), header = TRUE) %>% 
+        tbl_df()
+  # CI using SD of beta with scaling
+  sdScalePair_tmp <- ValSim %>% group_by(K, nRSloops, TrueBeta) %>% 
+          summarise(AvgBeta = mean(beta, na.rm = TRUE),  
+                    sdBeta = sd(beta, na.rm = TRUE)) %>%
+          mutate(CIlow =  AvgBeta - (qnorm(0.025, lower.tail = FALSE) * 
+                                       sdBeta * sqrt((K * (K-1)/2)/(n * (n-1)/2))),
+              CIup = AvgBeta + (qnorm(0.025, lower.tail = FALSE) * 
+                                  sdBeta * sqrt((K * (K-1)/2)/(n * (n-1)/2))),
+              type = 'scaledPairSD') %>% 
+          ungroup() %>% rowwise() %>% 
+          mutate(coverage_ind = ifelse(TrueBeta >= CIlow && TrueBeta <= CIup, 1, 0),
+              sim = i)
+  
+  # Collect the values over all simulations
+  scaledPairSD <- bind_rows(scaledPairSD,sdScalePair_tmp)
 }
 ```
 
