@@ -279,6 +279,12 @@ cowplot::plot_grid(scatter, Average, align = 'h')
 # Dimensions:
 # width = 760, height = 400, png
 
+# Histogram
+ggplot(complMWB, aes(x = sp_wd)) + geom_histogram(breaks = c(0,0.49,seq(0.99,5.99, by = 1),7))
+ggplot(complMWB, aes(x = sp_wd)) + geom_histogram(breaks = c(0,seq(0.99,5.99, by = 1), 7)) +
+  scale_x_continuous("Hours spent using smartphone (self-reported)", breaks = c(0,seq(0.99,5.99, by = 1), 7), labels = c(0:7))
+ggplot(complMWB, aes(x = sp_wd)) + geom_histogram(breaks = c(1:7))
+
 MaleFemale <- complMWB %>% 
   group_by(male, sp_wd) %>% summarise(mean_mwbi = mean(mwbi), sd_mwbi = sd(mwbi)) %>%
   mutate(CIlow = mean_mwbi - (qt(0.975, df = dim(complMWB)[1] - 1) * sd_mwbi / sqrt(dim(complMWB)[1]/2)),
@@ -306,6 +312,37 @@ Hist <- ggplot(complMWB, aes(x = mwbi)) + geom_histogram(bins = 20) +
   scale_y_continuous("Frequency") +
   theme_bw()
 Hist
+
+# Custom jittered scatter plot
+scatter_sep_tmp <- complMWB %>% rowwise() %>% mutate(jitter_max = ifelse(sp_wd %in% c(0, 0.5), 0.25, 0.5),
+                                                     jitter_min = ifelse(sp_wd %in% c(0.5,1), 0.25, 0.5))
+scatter_sep_data <- scatter_sep_tmp %>% mutate(jittered_x = runif(n = 1, min = sp_wd-jitter_min, max = sp_wd+jitter_max))
+scatter_sep <- ggplot(scatter_sep_data, aes(x = jittered_x, y = mwbi)) + 
+  geom_point(alpha = .05, size = .2, position = position_jitter(width = 0, height = 0.5)) +
+  scale_x_continuous("Hours spent using smartphone (self-reported) + jitter", breaks = c(0,0.5,1,2,3,4,5,6,7)) +
+  scale_y_continuous("Mental well-being") +
+  geom_smooth(mapping = aes(x = sp_wd, y = mwbi), method = 'lm', colour = '#fdcdac', size = .7) +
+  ggtitle("Scatter plot", subtitle = "Added fitted linear regression line") +
+  theme_bw() +
+  theme(plot.margin = unit(c(0.5, 0.5, 0.5, 0.5), "cm"),
+        plot.title = element_text(size = 12),
+        plot.subtitle = element_text(size = 9))
+scatter_sep
+
+
+# Boxplots
+boxplot <- 
+complMWB %>% group_by(sp_wd) %>% mutate(outlier = mwbi < (median(mwbi) - IQR(mwbi) * 1.5)) %>% ungroup() %>%
+  ggplot(aes(x = factor(sp_wd), y = mwbi)) + 
+  geom_boxplot(size = 0.9, fill = "white", colour = "#0570b0", outlier.shape = NA) +    # NO OUTLIERS
+    geom_jitter(data = function(x) dplyr::filter_(x, ~ outlier), width = 0.35, alpha = 0.2) +
+  scale_x_discrete("Hours spent using smartphone (self-reported)", breaks = c(0,0.5,1,2,3,4,5,6,7)) +
+  scale_y_continuous("Mental well-being") +
+  ggtitle("Boxplot") +
+  theme_bw() +
+  theme(plot.margin = unit(c(0.5, 0.5, 0.5, 0.5), "cm"),
+        plot.title = element_text(size = 12),
+        plot.subtitle = element_text(size = 9))
 
 ##
 ###############
@@ -422,6 +459,20 @@ bc_fitLM_Q_cX0 <- tmp_bc_data %>% mutate(bc_mwbi = ((mwbi^(optLam) - 1)/optLam))
   summary(.)
 qqnorm(residuals(bc_fitLM_Q_cX0));qqline(residuals(bc_fitLM_Q_cX0), col = 2)
 
+residualBoxCoxFull <- data.frame(Residuals = residuals(bc_fitLM_Q_cX0),
+           X = complMWB$sp_wd) %>% tbl_df() %>%
+  ggplot(., aes(x = X, y = Residuals)) + 
+  geom_jitter(height = NULL, width = 0.5, size = 0.2, alpha = 0.2) +
+  scale_x_continuous(name = 'Hours spent using smartphone (self-reported)') +
+  ggtitle("Residual plot after Box-Cox transformation") +
+  theme_minimal() +
+  theme(axis.text.x=element_text(angle = 0, hjust = 0, size = 9),
+        plot.margin = unit(c(0.5, 0.5, 0.5, 0.5), "cm"),
+        legend.position = "bottom",
+        legend.margin=margin(b = -0.2, unit='cm'),
+        plot.title = element_text(size = 12),
+        plot.subtitle = element_text(size = 9))
+
 
 # Square root
 sq_fitLM_woc <- complMWB %>% mutate(sq_mwbi = sqrt(mwbi)) %>%
@@ -492,7 +543,7 @@ Est_LM_woc <- fitLM_woc$coefficients[1] + (xValues*fitLM_woc$coefficients[2])
 Est_LM_c <- fitLM_c$coefficients[1] + (xValues*fitLM_c$coefficients[2])
 Est_LM_Q_wocX0 <- fitLM_Q_wocX0$coefficients[1] + (xValues*fitLM_Q_wocX0$coefficients[2]) + 
                   (xValues^2*fitLM_Q_wocX0$coefficients[3])
-Est_LM_Q_cX0 <- fitLM_Q_cX0$coefficients[1] + (xValues*fitLM_Q_cX0$coefficients[2]) +
+Est_LM_Q_cX0 <- fitLM_Q_cX0$coefficients[1] + (xValues*fitLM_Q_cX0$coefficients[2]) + 
                   (xValues^2*fitLM_Q_cX0$coefficients[3])
 
 datEst <- data.frame('X' = rep(xValues, 4), 
@@ -504,6 +555,7 @@ datEst <- data.frame('X' = rep(xValues, 4),
                              'Polynomial model (X = 0) - w covariates'), 
                            each = length(xValues))))
 
+#datEst %>% filter(Model %in% c('Polynomial model (X = 0) - w/o covariates', 'Polynomial model (X = 0) - w covariates')) %>%
 OLSest <- ggplot(datEst, aes(x = X, y = Estimates, group = Model)) + 
   geom_line(aes(colour = Model), size = 0.7) + geom_point(aes(colour = Model), size = 0.7) +
   scale_x_continuous(name = 'Hours spent using smartphone (self-reported)',
