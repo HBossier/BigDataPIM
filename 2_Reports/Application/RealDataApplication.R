@@ -222,13 +222,10 @@ summary(dataWB$minority)
 ##########################################################################################
 
 
-
-
-
-# Smartphone screen usage: without quadratic trend
-# dplyr::select the complete cases
+# Smartphone screen usage
+# Select the complete cases
 complMWB <- dataWB %>% 
-  dplyr::select(mwbi, sp_wd, male, minority, deprived) %>%
+  dplyr::select(mwbi, sp_wd, male, minority, deprived) %>% 
   filter(complete.cases(.)) %>% tbl_df()
 
 # Summary
@@ -331,8 +328,7 @@ scatter_sep
 
 
 # Boxplots
-boxplot <- 
-complMWB %>% group_by(sp_wd) %>% mutate(outlier = mwbi < (median(mwbi) - IQR(mwbi) * 1.5)) %>% ungroup() %>%
+boxplot <- complMWB %>% group_by(sp_wd) %>% mutate(outlier = mwbi < (median(mwbi) - IQR(mwbi) * 1.5)) %>% ungroup() %>%
   ggplot(aes(x = factor(sp_wd), y = mwbi)) + 
   geom_boxplot(size = 0.9, fill = "white", colour = "#0570b0", outlier.shape = NA) +    # NO OUTLIERS
     geom_jitter(data = function(x) dplyr::filter_(x, ~ outlier), width = 0.35, alpha = 0.2) +
@@ -343,6 +339,7 @@ complMWB %>% group_by(sp_wd) %>% mutate(outlier = mwbi < (median(mwbi) - IQR(mwb
   theme(plot.margin = unit(c(0.5, 0.5, 0.5, 0.5), "cm"),
         plot.title = element_text(size = 12),
         plot.subtitle = element_text(size = 9))
+boxplot
 
 ##
 ###############
@@ -1544,5 +1541,14 @@ residualPlot <- ggplot(res, aes(x = predicted, y = residuals)) + geom_point(size
 residualPlot
 
 
-
+# Write complete case data set
+ToWrite <- dataWB %>% 
+  dplyr::select(mwbi, 
+                watch_wd, watch_we,
+                play_wd, play_we,
+                comp_wd, comp_we, 
+                sp_wd, sp_we, male, minority, deprived) %>%
+  filter(complete.cases(.)) %>% tbl_df()
+write.csv(x = ToWrite, file = '~/Przybylski_cc.csv', quote = FALSE,
+          row.names = FALSE)
 
