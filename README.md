@@ -1,4 +1,4 @@
-# Big Data application: PIM
+# Fitting Probabilistic Index Models on Large Datasets
 
 ## Short introduction
 The following is a very dense summary of the class of Probabilistic Index Models used in this project. We refer to Thas et al. (2012) for more information.
